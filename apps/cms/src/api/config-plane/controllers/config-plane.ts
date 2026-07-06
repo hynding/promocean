@@ -1,7 +1,18 @@
+import { timingSafeEqual } from 'node:crypto'
+
+function configSecretOk(ctx: any): boolean {
+  const expected = process.env.CONFIG_PLANE_SECRET
+  if (!expected) return false // fail closed when unset
+  const provided = Buffer.from(String(ctx.request.header['x-config-secret'] ?? ''))
+  const expectedBuf = Buffer.from(expected)
+  return provided.length === expectedBuf.length && timingSafeEqual(provided, expectedBuf)
+}
+
 export default {
   async achievements(ctx: any) {
-    if (ctx.request.header['x-config-secret'] !== process.env.CONFIG_PLANE_SECRET) return ctx.unauthorized()
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
     const projectId = String(ctx.query.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
     const rows = await strapi.documents('api::achievement.achievement').findMany({
       filters: { project: { documentId: projectId } },
     })
@@ -17,7 +28,7 @@ export default {
     }
   },
   async verifyKey(ctx: any) {
-    if (ctx.request.header['x-config-secret'] !== process.env.CONFIG_PLANE_SECRET) return ctx.unauthorized()
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
     const { keyHash } = ctx.request.body ?? {}
     const rows = await strapi.documents('api::api-key.api-key').findMany({
       filters: { keyHash: { $eq: String(keyHash ?? '') } },

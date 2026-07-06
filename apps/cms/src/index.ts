@@ -29,6 +29,10 @@ export default {
         data: { ...a, artworkUrl: null, project: project.documentId },
       })
     }
-    strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key ${rawKey}`)
+    if (process.env.LOG_PLAINTEXT_KEYS === 'true') {
+      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key ${rawKey}`)
+    } else {
+      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key prefix=pk_test_demo_ (set LOG_PLAINTEXT_KEYS=true in dev to reveal)`)
+    }
   },
 }
