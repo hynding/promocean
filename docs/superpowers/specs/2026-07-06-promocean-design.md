@@ -125,6 +125,13 @@ surface for free and keeps `apps/api` read-only against the config plane. Key
 generation runs as a Strapi lifecycle hook that stores the hash and displays the
 plaintext once.
 
+**Config-plane protocol:** the runtime reaches Strapi through two small custom
+endpoints (`GET /config-plane/achievements`, `POST /config-plane/verify-key`) guarded
+by a shared-secret header (`x-config-secret`), rather than Strapi API tokens — tokens
+cannot be provisioned deterministically for CI, and a two-endpoint protocol makes the
+swap story concrete: any replacement backend implements those endpoints (or the
+`ConfigStore`/`ApiKeyStore` ports directly).
+
 ## 4. Domain Model & Data Flow
 
 ### 4.1 Core entities
