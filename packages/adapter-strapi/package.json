@@ -1,0 +1,22 @@
+{
+  "name": "@promocean/adapter-strapi",
+  "version": "0.0.1",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@promocean/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@promocean/config": "workspace:*",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.0"
+  }
+}
