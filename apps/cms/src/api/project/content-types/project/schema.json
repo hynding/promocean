@@ -1,0 +1,10 @@
+{
+  "kind": "collectionType",
+  "collectionName": "projects",
+  "info": { "singularName": "project", "pluralName": "projects", "displayName": "Project" },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "slug": { "type": "uid", "targetField": "name" }
+  }
+}

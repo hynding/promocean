@@ -1,0 +1,34 @@
+import { createHash } from 'node:crypto'
+
+export default {
+  register() {},
+  async bootstrap({ strapi }: { strapi: any }) {
+    if (process.env.SEED_DEMO !== 'true') return
+    const existing = await strapi.documents('api::project.project').findMany({ limit: 1 })
+    if (existing.length > 0) return
+    const project = await strapi.documents('api::project.project').create({
+      data: { name: 'Demo', slug: 'demo' },
+    })
+    const rawKey = 'pk_test_demo_1234567890abcdef'
+    await strapi.documents('api::api-key.api-key').create({
+      data: {
+        keyHash: createHash('sha256').update(rawKey).digest('hex'),
+        keyPrefix: rawKey.slice(0, 12),
+        keyType: 'publishable',
+        environment: 'test',
+        project: project.documentId,
+      },
+    })
+    const achievements = [
+      { name: 'First Lesson', description: 'Complete your first lesson.', eventType: 'lesson_completed', targetCount: 1 },
+      { name: 'Getting Started', description: 'Complete ten lessons.', eventType: 'lesson_completed', targetCount: 10 },
+      { name: 'Profiled', description: 'Complete your profile.', eventType: 'profile_completed', targetCount: 1 },
+    ]
+    for (const a of achievements) {
+      await strapi.documents('api::achievement.achievement').create({
+        data: { ...a, artworkUrl: null, project: project.documentId },
+      })
+    }
+    strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key ${rawKey}`)
+  },
+}

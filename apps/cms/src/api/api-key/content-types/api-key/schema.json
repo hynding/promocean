@@ -1,0 +1,13 @@
+{
+  "kind": "collectionType",
+  "collectionName": "api_keys",
+  "info": { "singularName": "api-key", "pluralName": "api-keys", "displayName": "API Key" },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "keyHash": { "type": "string", "unique": true, "configurable": false },
+    "keyPrefix": { "type": "string", "configurable": false },
+    "keyType": { "type": "enumeration", "enum": ["publishable", "secret"], "required": true, "default": "publishable" },
+    "environment": { "type": "enumeration", "enum": ["test", "live"], "required": true, "default": "test" },
+    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
+  }
+}

@@ -3,7 +3,10 @@ packages:
   - "packages/*"
 
 onlyBuiltDependencies:
+  - "@swc/core"
+  - core-js-pure
   - cpu-features
   - esbuild
   - protobufjs
+  - sharp
   - ssh2
