@@ -7,7 +7,7 @@ export const achievementStatusSchema = z.object({
   artworkUrl: z.string().nullable(),
   current: z.number().int(),
   target: z.number().int(),
-  unlockedAt: z.string().datetime().nullable(),
+  unlockedAt: z.iso.datetime().nullable(),
 })
 export type AchievementStatus = z.infer<typeof achievementStatusSchema>
 
