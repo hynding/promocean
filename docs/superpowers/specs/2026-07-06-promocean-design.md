@@ -111,6 +111,19 @@ degrades the admin experience only, never the runtime.
   full API). Retrofitting key separation later is painful; it ships in MVP.
 - Tenancy filtering is enforced once, at the adapter layer — not per-endpoint.
 - Per-key rate limits.
+- Secret keys are stored hashed (like passwords); shown once at creation.
+- Publishable keys are public by nature; each project may set an optional
+  **origin allowlist** — when set, browser calls with a `pk_` key are rejected from
+  other origins.
+
+### 3.5 Platform provisioning (MVP)
+
+There is no self-serve signup in MVP (deferred to v2 with billing). **Projects, API
+keys, and webhook endpoint registrations are Strapi content types**, managed through
+the same admin UI as campaign definitions. This gives operators (us) a provisioning
+surface for free and keeps `apps/api` read-only against the config plane. Key
+generation runs as a Strapi lifecycle hook that stores the hash and displays the
+plaintext once.
 
 ## 4. Domain Model & Data Flow
 
@@ -120,6 +133,9 @@ degrades the admin experience only, never the runtime.
 - **User** — external ID supplied by the customer. No PII stored beyond the ID.
 - **Event** — `{ projectId, environment, userId, type, idempotencyKey, occurredAt, meta }`.
   Raw events are stored (append-only), enabling retroactive achievement evaluation later.
+  **Event types are free-form in MVP** (normalized to `snake_case`); no pre-registration
+  step. Achievements match on the type string. Optional registered-type validation is a
+  v1.x nicety.
 - **Achievement** — definition: name, description, tiered artwork, criterion. MVP
   criterion type: *event-count* ("event X occurs N times"). Progress tracked as x/N.
 - **Offer** — creative (image/text/CTA), schedule window, placement targeting.
@@ -187,16 +203,37 @@ demo app ── sdk.track('lesson_completed') ──▶ POST /v1/events (apps/ap
 ## 5. Error Handling & Resilience
 
 - **Typed error envelope** `{ code, message, details }` from a fixed catalog in
-  `contracts` (`invalid_api_key`, `unknown_event_type`, `rate_limited`, …). SDK maps
-  codes to typed exceptions.
+  `contracts` (`invalid_api_key`, `invalid_payload`, `rate_limited`, `origin_not_allowed`,
+  …). SDK maps codes to typed exceptions. (No `unknown_event_type` — event types are
+  free-form per §4.1.)
 - **Widgets fail silent-to-empty:** an erroring placement renders nothing; widgets
   never break the host page.
-- **Idempotent ingestion:** client idempotency keys; duplicate events are no-ops.
-  This is also the future anti-cheat seam.
+- **Idempotent ingestion:** client idempotency keys with a **24-hour dedup window**;
+  duplicate events are no-ops. This is also the future anti-cheat seam.
+- **Queue seam:** MVP evaluates events synchronously in-request (fine at MVP scale).
+  The ingestion handler is structured so evaluation can move behind a queue (e.g.
+  BullMQ) later with no API contract change — the response's `unlocks` field is
+  already documented as "may be delivered via webhook instead" for future async mode.
 - **Stale-on-error config cache** (§3.3); webhook delivery has retries + a
   dead-letter table.
 - **Webhooks signed** with HMAC (`X-Promocean-Signature`) — table stakes per market
   research.
+- **Offer dismissal:** the SDK persists dismissals locally (localStorage) so a closed
+  banner stays closed on that device. Server-side frequency capping is roadmap (v2).
+
+## 5b. Observability & Deployment
+
+- **Observability (MVP):** structured logs (pino) with request IDs, Sentry for error
+  tracking on api/cms/demo, `/healthz` liveness + `/readyz` (DB/config-plane checks)
+  on the runtime API. Metrics dashboards deferred; usage counters double as the first
+  product metrics.
+- **Local DX:** `docker compose up` provides Postgres; `pnpm dev` starts cms + api +
+  demo with a **seed script** that loads demo definitions (three achievements, one
+  offer, one timed event) so the full loop works on first clone.
+- **Hosting (MVP):** api + cms + managed Postgres on Fly.io or Railway (either works;
+  decide in Sprint 0 spike); demo on Vercel. CI deploys `main` after green tests.
+- **Package publishing:** MIT packages (`sdk`, `widgets`, `contracts`) versioned and
+  published to npm via Changesets from CI.
 
 ## 6. Testing Strategy
 
@@ -214,6 +251,9 @@ demo app ── sdk.track('lesson_completed') ──▶ POST /v1/events (apps/ap
 ## 7. Roadmap (post-MVP tiers)
 
 **v1.x**
+- Basic stats endpoint (`GET /v1/stats`): unlock counts, offer impressions/clicks,
+  timed-event participation — the marketer's proof-of-value before real dashboards
+- Registered event types with typo detection (optional per project)
 - Leaderboards, streaks (needs per-user timezone windows), points/XP wallet
 - Coupon/promo-code generation and validation
 - Retroactive achievement granting (evaluate new definitions against stored events)
@@ -246,7 +286,8 @@ demo app ── sdk.track('lesson_completed') ──▶ POST /v1/events (apps/ap
 - **Definition of done:** tests pass, demo app exercises the feature, docs snippet
   written. No feature merges without demo-app usage.
 - **Sprint plan:**
-  - Sprint 0 — monorepo scaffold, CI, Strapi + Postgres running, key auth skeleton
+  - Sprint 0 — monorepo scaffold, CI, Strapi + Postgres running (Docker Compose +
+    seed script), key auth skeleton, hosting-platform spike (Fly.io vs Railway)
   - Sprint 1 — event ingestion + achievements vertical slice (definition → track →
     unlock → toast)
   - Sprint 2 — offers slice (definition → placement → impression/click)
