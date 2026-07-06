@@ -13,7 +13,7 @@ beforeAll(async () => {
   db = createDb(container.getConnectionUri())
   await runMigrations(db)
 })
-afterAll(async () => { await container.stop() })
+afterAll(async () => { await db.$client.end(); await container.stop() })
 
 describe('PgEventStore', () => {
   it('inserts then dedupes on idempotency key', async () => {

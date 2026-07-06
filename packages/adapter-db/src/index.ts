@@ -9,7 +9,7 @@ export function createDb(connectionString: string): Db {
   // being stopped in test teardown). Without a listener, Node treats it as an
   // unhandled exception and the process exits non-zero even though all tests
   // passed. See: https://node-postgres.com/apis/pool#error
-  pool.on('error', () => {})
+  pool.on('error', (err) => { console.error('[promocean/adapter-db] idle client error', err) })
   return drizzle(pool) as Db
 }
 export { runMigrations } from './migrate.js'
