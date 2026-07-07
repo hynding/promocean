@@ -172,6 +172,22 @@ importers:
         specifier: ^3.2.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@26.1.0)(terser@5.48.0)(tsx@4.23.0)(yaml@2.9.0)
 
+  packages/sdk:
+    dependencies:
+      '@promocean/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@promocean/config':
+        specifier: workspace:*
+        version: link:../config
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@26.1.0)(terser@5.48.0)(tsx@4.23.0)(yaml@2.9.0)
+
 packages:
 
   '@ai-sdk/gateway@1.0.29':
