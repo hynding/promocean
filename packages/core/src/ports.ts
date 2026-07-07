@@ -1,4 +1,4 @@
-import type { AchievementDefinition, AuthContext, OfferDefinition, Scope, TimedEventDefinition, WebhookEndpointDefinition } from './types.js'
+import type { AchievementDefinition, AuthContext, OfferDefinition, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
 
 export interface ConfigStore {
   getAchievements(projectId: string): Promise<AchievementDefinition[]>
@@ -45,6 +45,6 @@ export interface OfferMetricsStore {
 }
 
 export interface WebhookDeliveryStore {
-  claimTransition(projectId: string, eventId: string, transition: string): Promise<boolean>
+  claimTransition(projectId: string, eventId: string, transition: TimedEventTransition): Promise<boolean>
   recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date): Promise<void>
 }
