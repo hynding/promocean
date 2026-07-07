@@ -7,6 +7,7 @@ import { liveEventsRoute } from './routes/live-events.js'
 import { offersRoute } from './routes/offers.js'
 import { placementsRoute } from './routes/placements.js'
 import { usersRoute } from './routes/users.js'
+import type { WebhookDispatcher } from './webhooks.js'
 
 export interface AppDeps {
   configStore: ConfigStore
@@ -15,6 +16,7 @@ export interface AppDeps {
   progressStore: ProgressStore
   usageStore: UsageStore
   offerMetricsStore: OfferMetricsStore
+  webhooks?: WebhookDispatcher
 }
 
 export function createApp(deps: AppDeps) {

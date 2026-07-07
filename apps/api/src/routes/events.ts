@@ -44,6 +44,16 @@ export function eventsRoute(deps: AppDeps) {
     }
     await deps.usageStore.recordUsage(scope, userId, new Date().toISOString().slice(0, 7))
 
+    if (unlocks.length > 0 && deps.webhooks) {
+      void deps.webhooks
+        .deliver(scope.projectId, {
+          type: 'achievement.unlocked',
+          data: { userId, environment: scope.environment, unlocks },
+          createdAt: unlockedAt.toISOString(),
+        })
+        .catch(() => {})
+    }
+
     return c.json({ deduped: false, unlocks, progress: result.progressUpdates } satisfies TrackEventResponse)
   })
   return app
