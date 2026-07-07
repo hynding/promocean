@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import type { ApiKeyStore, ConfigStore, EventStore, ProgressStore, UsageStore } from '@promocean/core'
+import type { ApiKeyStore, ConfigStore, EventStore, OfferMetricsStore, ProgressStore, UsageStore } from '@promocean/core'
 import { authMiddleware } from './auth.js'
 import { eventsRoute } from './routes/events.js'
+import { offersRoute } from './routes/offers.js'
+import { placementsRoute } from './routes/placements.js'
 import { usersRoute } from './routes/users.js'
 
 export interface AppDeps {
@@ -11,6 +13,7 @@ export interface AppDeps {
   eventStore: EventStore
   progressStore: ProgressStore
   usageStore: UsageStore
+  offerMetricsStore: OfferMetricsStore
 }
 
 export function createApp(deps: AppDeps) {
@@ -20,6 +23,8 @@ export function createApp(deps: AppDeps) {
   app.use('/v1/*', authMiddleware(deps.apiKeyStore))
   app.route('/v1/events', eventsRoute(deps))
   app.route('/v1/users', usersRoute(deps))
+  app.route('/v1/placements', placementsRoute(deps))
+  app.route('/v1/offers', offersRoute(deps))
   app.onError((err, c) => {
     console.error(err)
     return c.json({ error: { code: 'internal_error', message: 'Internal error.' } }, 500)

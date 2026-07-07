@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server'
-import { createDb, runMigrations, PgEventStore, PgProgressStore, PgUsageStore } from '@promocean/adapter-db'
+import { createDb, runMigrations, PgEventStore, PgOfferMetricsStore, PgProgressStore, PgUsageStore } from '@promocean/adapter-db'
 import { StrapiConfigPlane } from '@promocean/adapter-strapi'
 import { createApp } from './app.js'
 
@@ -15,6 +15,7 @@ const app = createApp({
   eventStore: new PgEventStore(db),
   progressStore: new PgProgressStore(db),
   usageStore: new PgUsageStore(db),
+  offerMetricsStore: new PgOfferMetricsStore(db),
 })
 const port = Number(process.env.API_PORT ?? 3001)
 serve({ fetch: app.fetch, port })
