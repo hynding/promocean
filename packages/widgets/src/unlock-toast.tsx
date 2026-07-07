@@ -1,15 +1,27 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { UnlockPayload } from '@promocean/contracts'
 import { usePromocean } from './provider.js'
 
 export function UnlockToast({ durationMs = 5000 }: { durationMs?: number }) {
   const client = usePromocean()
   const [toasts, setToasts] = useState<UnlockPayload[]>([])
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>())
 
-  useEffect(() => client.onUnlock((u) => {
-    setToasts((t) => [...t, u])
-    setTimeout(() => setToasts((t) => t.filter((x) => x !== u)), durationMs)
-  }), [client, durationMs])
+  useEffect(() => {
+    const unsubscribe = client.onUnlock((u) => {
+      setToasts((t) => [...t, u])
+      const id = setTimeout(() => {
+        timers.current.delete(id)
+        setToasts((t) => t.filter((x) => x !== u))
+      }, durationMs)
+      timers.current.add(id)
+    })
+    return () => {
+      unsubscribe()
+      for (const id of timers.current) clearTimeout(id)
+      timers.current.clear()
+    }
+  }, [client, durationMs])
 
   return (
     <div role="status" aria-live="polite" style={{ position: 'fixed', bottom: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 2147483647 }}>
