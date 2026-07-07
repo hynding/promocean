@@ -44,3 +44,13 @@ export const usageCounters = runtime.table('usage_counters', {
   month: text('month').notNull(),
   eventsCount: integer('events_count').notNull().default(0),
 }, (t) => [uniqueIndex('usage_uq').on(t.projectId, t.environment, t.month)])
+
+export const offerEvents = runtime.table('offer_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: text('project_id').notNull(),
+  environment: text('environment').notNull(),
+  offerId: text('offer_id').notNull(),
+  userId: text('user_id'),
+  kind: text('kind').notNull(), // 'impression' | 'click'
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
