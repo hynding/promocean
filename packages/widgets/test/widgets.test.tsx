@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { UnlockPayload } from '@promocean/contracts'
-import { BadgeCabinet, Placement, PromoceanProvider, UnlockToast } from '../src/index.js'
+import { BadgeCabinet, EventCountdown, Placement, PromoceanProvider, UnlockToast } from '../src/index.js'
 
 // RTL's automatic afterEach cleanup only registers when `afterEach` exists as a
 // global; this project's vitest config doesn't set `test.globals: true`, so
@@ -16,6 +16,7 @@ function fakeClient(achievements: unknown[] = [], offer: unknown = null) {
       onUnlock: (cb: (u: UnlockPayload) => void) => { listeners.add(cb); return () => listeners.delete(cb) },
       getAchievements: vi.fn().mockResolvedValue(achievements),
       getPlacementOffer: vi.fn().mockResolvedValue(offer),
+      getLiveEvents: vi.fn().mockResolvedValue([]),
       clickOffer: vi.fn().mockResolvedValue(undefined),
       dismissOffer: vi.fn(),
       isOfferDismissed: vi.fn().mockReturnValue(false),
@@ -97,5 +98,78 @@ describe('Placement', () => {
     await waitFor(() => expect(screen.getByText('Welcome to Promocean')).toBeDefined())
     expect(screen.queryByRole('link')).toBeNull()
     expect(document.querySelector('img')).toBeNull()
+  })
+})
+
+describe('EventCountdown', () => {
+  it('renders event name and a countdown that changes after a second passes', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-06T00:00:00.000Z'))
+      const { client } = fakeClient()
+      client.getLiveEvents = vi.fn().mockResolvedValue([
+        {
+          eventId: 'e1',
+          name: 'Summer Sale',
+          description: null,
+          state: 'live',
+          startsAt: '2026-07-05T00:00:00.000Z',
+          endsAt: '2026-07-06T02:00:00.000Z',
+          multiplier: 2,
+          secondsUntilStart: null,
+          secondsUntilEnd: 7200,
+        },
+      ])
+      const { container } = render(<PromoceanProvider client={client}><EventCountdown /></PromoceanProvider>)
+      await act(async () => { await Promise.resolve() })
+      const row = container.querySelector('[data-promocean-event="e1"]')
+      expect(row).not.toBeNull()
+      expect(row?.textContent).toContain('Summer Sale')
+      expect(row?.textContent).toContain('Ends in')
+      const before = row?.textContent
+      expect(before).toContain('2h 0m 0s')
+      act(() => { vi.advanceTimersByTime(1000) })
+      const after = row?.textContent
+      expect(after).not.toBe(before)
+      expect(after).toContain('1h 59m 59s')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('renders nothing when getLiveEvents rejects', async () => {
+    const { client } = fakeClient()
+    client.getLiveEvents = vi.fn().mockRejectedValue(new Error('down'))
+    const { container } = render(<PromoceanProvider client={client}><EventCountdown /></PromoceanProvider>)
+    await waitFor(() => expect(client.getLiveEvents).toHaveBeenCalled())
+    expect(container.querySelector('[data-promocean-event]')).toBeNull()
+  })
+
+  it('clears the interval on unmount', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-06T00:00:00.000Z'))
+      const { client } = fakeClient()
+      client.getLiveEvents = vi.fn().mockResolvedValue([
+        {
+          eventId: 'e1',
+          name: 'Summer Sale',
+          description: null,
+          state: 'scheduled',
+          startsAt: '2026-07-06T01:00:00.000Z',
+          endsAt: '2026-07-06T02:00:00.000Z',
+          multiplier: 2,
+          secondsUntilStart: 3600,
+          secondsUntilEnd: 7200,
+        },
+      ])
+      const { unmount } = render(<PromoceanProvider client={client}><EventCountdown /></PromoceanProvider>)
+      await act(async () => { await Promise.resolve() })
+      unmount()
+      expect(() => { act(() => { vi.advanceTimersByTime(2000) }) }).not.toThrow()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
