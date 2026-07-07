@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { trackEventRequestSchema, type TrackEventResponse } from '@promocean/contracts'
 import { activeMultiplier, evaluateEvent, type Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
+import { logger } from '../logger.js'
 
 export function eventsRoute(deps: AppDeps) {
   const app = new Hono()
@@ -28,7 +29,7 @@ export function eventsRoute(deps: AppDeps) {
     try {
       multiplier = activeMultiplier(await deps.configStore.getTimedEvents(scope.projectId), occurredAt)
     } catch (err) {
-      console.error('timed events fetch failed; defaulting multiplier to 1', err)
+      logger.warn({ err }, 'timed events fetch failed; defaulting multiplier to 1')
     }
 
     const result = evaluateEvent({ userId, type, occurredAt }, definitions, counts, multiplier)

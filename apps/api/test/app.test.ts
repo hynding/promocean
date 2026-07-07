@@ -64,3 +64,19 @@ describe('GET /healthz', () => {
     expect(res.status).toBe(200)
   })
 })
+
+describe('request id middleware', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  it('sets an x-request-id header shaped like a uuid on every response', async () => {
+    const res = await app().request('/healthz')
+    expect(res.headers.get('x-request-id')).toMatch(UUID_RE)
+  })
+
+  it('sets a distinct x-request-id per request', async () => {
+    const a = app()
+    const res1 = await a.request('/healthz')
+    const res2 = await a.request('/healthz')
+    expect(res1.headers.get('x-request-id')).not.toBe(res2.headers.get('x-request-id'))
+  })
+})

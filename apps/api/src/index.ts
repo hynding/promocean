@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server'
 import { createDb, runMigrations, PgErasureStore, PgEventStore, PgOfferMetricsStore, PgProgressStore, PgUsageStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
 import { StrapiConfigPlane } from '@promocean/adapter-strapi'
 import { createApp } from './app.js'
+import { logger } from './logger.js'
 import { WebhookDispatcher, startLifecycleScheduler } from './webhooks.js'
 
 const db = createDb(process.env.DATABASE_URL!)
@@ -25,4 +26,4 @@ const app = createApp({
 })
 const port = Number(process.env.API_PORT ?? 3001)
 serve({ fetch: app.fetch, port })
-console.log(`promocean api listening on :${port}`)
+logger.info({ port }, 'promocean api listening')
