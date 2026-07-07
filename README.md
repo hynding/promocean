@@ -4,6 +4,14 @@ Achievements, offers, and live promotional events for any website or app — one
 
 Monorepo: pnpm + Turborepo. See `docs/superpowers/specs/` for the design spec.
 
+### Timed events
+
+Timed events apply an achievement-progress multiplier while an event is live
+or ending soon. When multiple events are live at once, the **highest**
+multiplier wins — multipliers don't stack. Progress is always **clamped at
+the achievement target**, so a ×2 event takes 9/10 to 10/10, not 11. Event
+windows (`startsAt`/`endsAt`) are absolute UTC instants, not durations.
+
 ## Quickstart (dev)
 
     corepack enable && pnpm install

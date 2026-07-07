@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto'
-import type { AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, OfferDefinition } from '@promocean/core'
+import type {
+  AchievementDefinition,
+  ApiKeyStore,
+  AuthContext,
+  ConfigStore,
+  OfferDefinition,
+  TimedEventDefinition,
+  WebhookEndpointDefinition,
+} from '@promocean/core'
 
 export interface StrapiConfigPlaneOptions {
   baseUrl: string
@@ -16,6 +24,9 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   private achievementsCache = new Map<string, CacheEntry<AchievementDefinition[]>>()
   private offersCache = new Map<string, CacheEntry<OfferDefinition[]>>()
   private authCache = new Map<string, CacheEntry<AuthContext | null>>()
+  private timedEventsCache = new Map<string, CacheEntry<TimedEventDefinition[]>>()
+  private allTimedEventsCache = new Map<string, CacheEntry<Array<TimedEventDefinition & { projectId: string }>>>()
+  private webhookEndpointsCache = new Map<string, CacheEntry<WebhookEndpointDefinition[]>>()
 
   constructor(private opts: StrapiConfigPlaneOptions) {
     this.ttl = opts.cacheTtlMs ?? 30_000
@@ -66,9 +77,91 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         endsAt: o.endsAt ? new Date(String(o.endsAt)) : null,
         priority: Number(o.priority ?? 0),
         audience: { kind: 'everyone' },
+        timedEventId: (o.timedEventId as string | null) ?? null,
       }))
       this.offersCache.set(projectId, { value: offers, expires: Date.now() + this.ttl })
       return offers
+    } catch (err) {
+      if (cached) return cached.value
+      throw err
+    }
+  }
+
+  async getTimedEvents(projectId: string): Promise<TimedEventDefinition[]> {
+    const cached = this.timedEventsCache.get(projectId)
+    if (cached && cached.expires > Date.now()) return cached.value
+    try {
+      const res = await this.fetchImpl(
+        `${this.opts.baseUrl}/api/config-plane/timed-events?projectId=${encodeURIComponent(projectId)}`,
+        { headers: this.headers() },
+      )
+      if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+      const body = (await res.json()) as { events: Array<Record<string, unknown>> }
+      const events: TimedEventDefinition[] = body.events.map((e) => ({
+        id: String(e.id),
+        name: String(e.name),
+        description: (e.description as string | null) ?? null,
+        startsAt: new Date(String(e.startsAt)),
+        endsAt: new Date(String(e.endsAt)),
+        endingSoonMinutes: Number(e.endingSoonMinutes ?? 1440),
+        multiplier: Number(e.multiplier ?? 1),
+        enabled: Boolean(e.enabled),
+      }))
+      this.timedEventsCache.set(projectId, { value: events, expires: Date.now() + this.ttl })
+      return events
+    } catch (err) {
+      if (cached) return cached.value
+      throw err
+    }
+  }
+
+  async getAllTimedEvents(): Promise<Array<TimedEventDefinition & { projectId: string }>> {
+    const key = '*'
+    const cached = this.allTimedEventsCache.get(key)
+    if (cached && cached.expires > Date.now()) return cached.value
+    try {
+      const res = await this.fetchImpl(`${this.opts.baseUrl}/api/config-plane/timed-events/all`, {
+        headers: this.headers(),
+      })
+      if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+      const body = (await res.json()) as { events: Array<Record<string, unknown>> }
+      const events: Array<TimedEventDefinition & { projectId: string }> = body.events.map((e) => ({
+        id: String(e.id),
+        projectId: String(e.projectId),
+        name: String(e.name),
+        description: (e.description as string | null) ?? null,
+        startsAt: new Date(String(e.startsAt)),
+        endsAt: new Date(String(e.endsAt)),
+        endingSoonMinutes: Number(e.endingSoonMinutes ?? 1440),
+        multiplier: Number(e.multiplier ?? 1),
+        enabled: Boolean(e.enabled),
+      }))
+      this.allTimedEventsCache.set(key, { value: events, expires: Date.now() + this.ttl })
+      return events
+    } catch (err) {
+      if (cached) return cached.value
+      throw err
+    }
+  }
+
+  async getWebhookEndpoints(projectId: string): Promise<WebhookEndpointDefinition[]> {
+    const cached = this.webhookEndpointsCache.get(projectId)
+    if (cached && cached.expires > Date.now()) return cached.value
+    try {
+      const res = await this.fetchImpl(
+        `${this.opts.baseUrl}/api/config-plane/webhook-endpoints?projectId=${encodeURIComponent(projectId)}`,
+        { headers: this.headers() },
+      )
+      if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+      const body = (await res.json()) as { endpoints: Array<Record<string, unknown>> }
+      const endpoints: WebhookEndpointDefinition[] = body.endpoints.map((e) => ({
+        id: String(e.id),
+        url: String(e.url),
+        secret: String(e.secret),
+        enabled: Boolean(e.enabled),
+      }))
+      this.webhookEndpointsCache.set(projectId, { value: endpoints, expires: Date.now() + this.ttl })
+      return endpoints
     } catch (err) {
       if (cached) return cached.value
       throw err

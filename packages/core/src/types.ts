@@ -45,4 +45,26 @@ export interface OfferDefinition {
   endsAt: Date | null
   priority: number
   audience: OfferAudience
+  timedEventId: string | null
+}
+
+export type TimedEventState = 'draft' | 'scheduled' | 'live' | 'ending_soon' | 'ended'
+export type TimedEventTransition = 'live' | 'ending_soon' | 'ended'
+
+export interface TimedEventDefinition {
+  id: string
+  name: string
+  description: string | null
+  startsAt: Date
+  endsAt: Date
+  endingSoonMinutes: number
+  multiplier: number
+  enabled: boolean
+}
+
+export interface WebhookEndpointDefinition {
+  id: string
+  url: string
+  secret: string
+  enabled: boolean
 }

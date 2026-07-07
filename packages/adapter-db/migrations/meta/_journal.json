@@ -15,6 +15,13 @@
       "when": 1783398768729,
       "tag": "0001_sturdy_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783403411504,
+      "tag": "0002_good_wendigo",
+      "breakpoints": true
     }
   ]
 }

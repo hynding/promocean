@@ -69,6 +69,18 @@ export default {
         project: project.documentId,
       },
     })
+    await strapi.documents('api::timed-event.timed-event').create({
+      data: {
+        name: 'Double Progress Weekend',
+        description: 'All achievement progress counts double.',
+        startsAt: new Date(Date.now() - 3600_000),
+        endsAt: new Date(Date.now() + 7 * 24 * 3600_000),
+        endingSoonMinutes: 1440,
+        multiplier: 2,
+        enabled: true,
+        project: project.documentId,
+      },
+    })
     if (process.env.LOG_PLAINTEXT_KEYS === 'true') {
       strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key ${rawKey}`)
     } else {

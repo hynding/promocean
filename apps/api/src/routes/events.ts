@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { trackEventRequestSchema, type TrackEventResponse } from '@promocean/contracts'
-import { evaluateEvent, type Scope } from '@promocean/core'
+import { activeMultiplier, evaluateEvent, type Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
 
 export function eventsRoute(deps: AppDeps) {
@@ -23,7 +23,15 @@ export function eventsRoute(deps: AppDeps) {
     const definitions = await deps.configStore.getAchievements(scope.projectId)
     const relevant = definitions.filter((d) => d.eventType === type)
     const counts = await deps.progressStore.getCounts(scope, userId, relevant.map((d) => d.id))
-    const result = evaluateEvent({ userId, type, occurredAt }, definitions, counts)
+
+    let multiplier = 1
+    try {
+      multiplier = activeMultiplier(await deps.configStore.getTimedEvents(scope.projectId), occurredAt)
+    } catch (err) {
+      console.error('timed events fetch failed; defaulting multiplier to 1', err)
+    }
+
+    const result = evaluateEvent({ userId, type, occurredAt }, definitions, counts, multiplier)
 
     const unlockedAt = new Date()
     const unlocks: TrackEventResponse['unlocks'] = []
@@ -35,6 +43,16 @@ export function eventsRoute(deps: AppDeps) {
       if (isNew) unlocks.push({ achievementId: u.achievementId, name: u.name, unlockedAt: unlockedAt.toISOString() })
     }
     await deps.usageStore.recordUsage(scope, userId, new Date().toISOString().slice(0, 7))
+
+    if (unlocks.length > 0 && deps.webhooks) {
+      void deps.webhooks
+        .deliver(scope.projectId, {
+          type: 'achievement.unlocked',
+          data: { userId, environment: scope.environment, unlocks },
+          createdAt: unlockedAt.toISOString(),
+        })
+        .catch(() => {})
+    }
 
     return c.json({ deduped: false, unlocks, progress: result.progressUpdates } satisfies TrackEventResponse)
   })

@@ -7,6 +7,7 @@ test('track → unlock toast → badge cabinet', async ({ page }) => {
   await expect(page.getByRole('status')).toContainText('First Lesson')
   const cabinet = page.getByRole('list')
   await expect(cabinet.getByText('First Lesson', { exact: true })).toBeVisible()
-  await expect(cabinet.getByText('1/10')).toBeVisible()
+  // seeded "Double Progress Weekend" (multiplier 2) is live — one lesson counts double
+  await expect(cabinet.getByText('2/10')).toBeVisible()
   await expect(cabinet.locator('[data-locked="false"]').getByText('First Lesson', { exact: true })).toBeVisible()
 })

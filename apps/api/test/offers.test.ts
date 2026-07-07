@@ -5,7 +5,7 @@ import { makeFakes } from './fakes.js'
 const offer = {
   id: 'o1', placementSlug: 'homepage-banner', headline: 'Welcome to Promocean',
   body: null, imageUrl: null, ctaText: 'Learn more', ctaUrl: 'https://example.com',
-  startsAt: null, endsAt: null, priority: 0, audience: { kind: 'everyone' as const },
+  startsAt: null, endsAt: null, priority: 0, audience: { kind: 'everyone' as const }, timedEventId: null,
 }
 const auth = { projectId: 'p1', environment: 'test' as const, keyType: 'publishable' as const }
 const headers = { authorization: 'Bearer pk_test_valid_key_1', 'content-type': 'application/json' }

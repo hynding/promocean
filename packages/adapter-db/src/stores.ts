@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import type { EventStore, OfferMetricsStore, ProgressStore, Scope, UsageStore } from '@promocean/core'
-import { achievementProgress, events, monthlyActiveUsers, offerEvents, unlocks, usageCounters } from './schema.js'
+import type { EventStore, OfferMetricsStore, ProgressStore, Scope, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
+import { achievementProgress, events, monthlyActiveUsers, offerEvents, timedEventNotifications, unlocks, usageCounters, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
 
 const scoped = (t: { projectId: any; environment: any }, s: Scope) =>
@@ -77,5 +77,19 @@ export class PgOfferMetricsStore implements OfferMetricsStore {
   }
   async recordClick(scope: Scope, offerId: string, userId: string | null, at: Date) {
     await this.db.insert(offerEvents).values({ ...scope, offerId, userId, kind: 'click', createdAt: at })
+  }
+}
+
+export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
+  constructor(private db: Db) {}
+  async claimTransition(projectId: string, eventId: string, transition: TimedEventTransition) {
+    const inserted = await this.db.insert(timedEventNotifications)
+      .values({ projectId, eventId, transition })
+      .onConflictDoNothing()
+      .returning({ eventId: timedEventNotifications.eventId })
+    return inserted.length > 0
+  }
+  async recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date) {
+    await this.db.insert(webhookDeadLetters).values({ projectId, url, payload, error, createdAt: at })
   }
 }

@@ -14,6 +14,7 @@
     "endsAt": { "type": "datetime" },
     "priority": { "type": "integer", "default": 0, "required": true },
     "placement": { "type": "relation", "relation": "manyToOne", "target": "api::placement.placement" },
-    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
+    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" },
+    "timedEvent": { "type": "relation", "relation": "manyToOne", "target": "api::timed-event.timed-event" }
   }
 }

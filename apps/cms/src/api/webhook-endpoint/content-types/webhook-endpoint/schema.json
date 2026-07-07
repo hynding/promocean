@@ -1,0 +1,12 @@
+{
+  "kind": "collectionType",
+  "collectionName": "webhook_endpoints",
+  "info": { "singularName": "webhook-endpoint", "pluralName": "webhook-endpoints", "displayName": "Webhook Endpoint" },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "url": { "type": "string", "required": true },
+    "secret": { "type": "string", "configurable": false, "private": true },
+    "enabled": { "type": "boolean", "required": true, "default": true },
+    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
+  }
+}

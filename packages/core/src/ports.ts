@@ -1,8 +1,11 @@
-import type { AchievementDefinition, AuthContext, OfferDefinition, Scope } from './types.js'
+import type { AchievementDefinition, AuthContext, OfferDefinition, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
 
 export interface ConfigStore {
   getAchievements(projectId: string): Promise<AchievementDefinition[]>
   getOffers(projectId: string): Promise<OfferDefinition[]>
+  getTimedEvents(projectId: string): Promise<TimedEventDefinition[]>
+  getAllTimedEvents(): Promise<Array<TimedEventDefinition & { projectId: string }>>
+  getWebhookEndpoints(projectId: string): Promise<WebhookEndpointDefinition[]>
 }
 
 export interface ApiKeyStore {
@@ -39,4 +42,9 @@ export interface UsageStore {
 export interface OfferMetricsStore {
   recordImpression(scope: Scope, offerId: string, userId: string | null, at: Date): Promise<void>
   recordClick(scope: Scope, offerId: string, userId: string | null, at: Date): Promise<void>
+}
+
+export interface WebhookDeliveryStore {
+  claimTransition(projectId: string, eventId: string, transition: TimedEventTransition): Promise<boolean>
+  recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date): Promise<void>
 }
