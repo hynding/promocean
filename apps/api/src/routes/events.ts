@@ -34,7 +34,7 @@ export function eventsRoute(deps: AppDeps) {
       const isNew = await deps.progressStore.recordUnlock(scope, userId, u.achievementId, unlockedAt)
       if (isNew) unlocks.push({ achievementId: u.achievementId, name: u.name, unlockedAt: unlockedAt.toISOString() })
     }
-    await deps.usageStore.recordUsage(scope, userId, occurredAt.toISOString().slice(0, 7))
+    await deps.usageStore.recordUsage(scope, userId, new Date().toISOString().slice(0, 7))
 
     return c.json({ deduped: false, unlocks, progress: result.progressUpdates } satisfies TrackEventResponse)
   })
