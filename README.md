@@ -71,10 +71,10 @@ boots Postgres, cms, and api with throwaway secrets before running the spec.
 
 ## Publishing
 
-MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) publish via the manual Release workflow. To publish a new version:
+MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) publish via a two-step manual flow:
 
-1. Run `pnpm changeset` to create a changeset file (describes the change type and affected packages).
-2. Commit the changeset.
-3. Trigger the Release workflow from GitHub Actions (requires the `NPM_TOKEN` repo secret).
+1. **Describe the change**: Run `pnpm changeset` to create a `.changeset/*.md` file (describes the change type and affected packages). Commit this file with your PR.
 
-The Release workflow builds packages and publishes them to npm automatically.
+2. **Bump versions**: Before releasing, run `pnpm changeset version` to consume pending changesets, bump `package.json` versions, and update changelogs. Commit and merge this version bump.
+
+3. **Publish to npm**: Trigger the **Release** workflow from GitHub Actions (Actions → Release → Run workflow). The workflow builds packages and runs `changeset publish`, publishing any versions not yet on npm. Requires the `NPM_TOKEN` repo secret.
