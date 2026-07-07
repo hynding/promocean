@@ -1,6 +1,6 @@
 import {
-  trackEventResponseSchema, userAchievementsResponseSchema,
-  type AchievementStatus, type TrackEventResponse, type UnlockPayload,
+  trackEventResponseSchema, userAchievementsResponseSchema, placementOfferResponseSchema,
+  type AchievementStatus, type TrackEventResponse, type UnlockPayload, type OfferCreative,
 } from '@promocean/contracts'
 
 export interface PromoceanOptions {
@@ -24,6 +24,7 @@ export class Promocean {
   private maxRetries: number
   private chain: Promise<unknown> = Promise.resolve()
   private listeners = new Set<(u: UnlockPayload) => void>()
+  private dismissedFallback = new Set<string>()
 
   constructor(private opts: PromoceanOptions) {
     this.userId = opts.userId
@@ -84,5 +85,34 @@ export class Promocean {
     if (!this.userId) throw new Error('No user identified — call identify(userId) first.')
     const res = await this.request(`/v1/users/${encodeURIComponent(this.userId)}/achievements`)
     return userAchievementsResponseSchema.parse(await res.json()).achievements
+  }
+
+  async getPlacementOffer(slug: string): Promise<OfferCreative | null> {
+    const qs = this.userId ? `?userId=${encodeURIComponent(this.userId)}` : ''
+    const res = await this.request(`/v1/placements/${encodeURIComponent(slug)}/offer${qs}`)
+    return placementOfferResponseSchema.parse(await res.json()).offer
+  }
+
+  async clickOffer(offerId: string): Promise<void> {
+    try {
+      await this.request(`/v1/offers/${encodeURIComponent(offerId)}/click`, {
+        method: 'POST',
+        body: JSON.stringify(this.userId ? { userId: this.userId } : {}),
+      })
+    } catch {
+      // fire-and-forget: a failed click must never break the host page
+    }
+  }
+
+  private dismissalKey(offerId: string) { return `promocean:dismissed:${offerId}` }
+
+  dismissOffer(offerId: string): void {
+    try { globalThis.localStorage.setItem(this.dismissalKey(offerId), '1') }
+    catch { this.dismissedFallback.add(offerId) }
+  }
+
+  isOfferDismissed(offerId: string): boolean {
+    try { return globalThis.localStorage.getItem(this.dismissalKey(offerId)) === '1' }
+    catch { return this.dismissedFallback.has(offerId) }
   }
 }
