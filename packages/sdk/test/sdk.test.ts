@@ -86,3 +86,26 @@ describe('offers', () => {
     expect(c.isOfferDismissed('o1')).toBe(true)
   })
 })
+
+describe('getLiveEvents', () => {
+  it('fetches and returns the live events array', async () => {
+    const liveEventBody = {
+      events: [{
+        eventId: 'evt_live_1',
+        name: 'Flash Sale',
+        description: null,
+        state: 'live',
+        startsAt: '2026-07-06T00:00:00.000Z',
+        endsAt: '2026-07-13T00:00:00.000Z',
+        multiplier: 2,
+        secondsUntilStart: null,
+        secondsUntilEnd: 604800,
+      }],
+    }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(liveEventBody))
+    const c = client(fetchImpl)
+    const events = await c.getLiveEvents()
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/events/live')
+    expect(events).toEqual(liveEventBody.events)
+  })
+})

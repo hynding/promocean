@@ -1,6 +1,7 @@
 import {
   trackEventResponseSchema, userAchievementsResponseSchema, placementOfferResponseSchema,
-  type AchievementStatus, type TrackEventResponse, type UnlockPayload, type OfferCreative,
+  liveEventsResponseSchema,
+  type AchievementStatus, type TrackEventResponse, type UnlockPayload, type OfferCreative, type LiveTimedEvent,
 } from '@promocean/contracts'
 
 export interface PromoceanOptions {
@@ -91,6 +92,11 @@ export class Promocean {
     const qs = this.userId ? `?userId=${encodeURIComponent(this.userId)}` : ''
     const res = await this.request(`/v1/placements/${encodeURIComponent(slug)}/offer${qs}`)
     return placementOfferResponseSchema.parse(await res.json()).offer
+  }
+
+  async getLiveEvents(): Promise<LiveTimedEvent[]> {
+    const res = await this.request('/v1/events/live')
+    return liveEventsResponseSchema.parse(await res.json()).events
   }
 
   async clickOffer(offerId: string): Promise<void> {
