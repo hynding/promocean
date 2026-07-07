@@ -68,3 +68,13 @@ cms + api already running (per above):
 
 This is also run in CI as the `e2e` job in `.github/workflows/ci.yml`, which
 boots Postgres, cms, and api with throwaway secrets before running the spec.
+
+## Publishing
+
+MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) publish via the manual Release workflow. To publish a new version:
+
+1. Run `pnpm changeset` to create a changeset file (describes the change type and affected packages).
+2. Commit the changeset.
+3. Trigger the Release workflow from GitHub Actions (requires the `NPM_TOKEN` repo secret).
+
+The Release workflow builds packages and publishes them to npm automatically.
