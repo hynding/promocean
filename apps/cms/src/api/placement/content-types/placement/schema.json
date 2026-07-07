@@ -1,0 +1,11 @@
+{
+  "kind": "collectionType",
+  "collectionName": "placements",
+  "info": { "singularName": "placement", "pluralName": "placements", "displayName": "Placement" },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "slug": { "type": "string", "required": true, "regex": "^[a-z][a-z0-9-]*$" },
+    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "kind": "collectionType",
+  "collectionName": "offers",
+  "info": { "singularName": "offer", "pluralName": "offers", "displayName": "Offer" },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "headline": { "type": "string", "required": true },
+    "body": { "type": "text" },
+    "imageUrl": { "type": "string" },
+    "ctaText": { "type": "string" },
+    "ctaUrl": { "type": "string" },
+    "startsAt": { "type": "datetime" },
+    "endsAt": { "type": "datetime" },
+    "priority": { "type": "integer", "default": 0, "required": true },
+    "placement": { "type": "relation", "relation": "manyToOne", "target": "api::placement.placement" },
+    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
+  }
+}
