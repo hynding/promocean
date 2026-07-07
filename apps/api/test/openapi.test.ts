@@ -13,7 +13,7 @@ describe('GET /v1/openapi.json', () => {
   it('describes all six documented endpoints', async () => {
     const res = await app().request('/v1/openapi.json')
     const doc = await res.json()
-    expect(doc.openapi).toBe('3.1.0')
+    expect(doc.openapi).toBe('3.0.3')
     expect(Object.keys(doc.paths)).toEqual(
       expect.arrayContaining([
         '/v1/events',
