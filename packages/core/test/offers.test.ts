@@ -3,7 +3,7 @@ import { resolveOffer, type OfferDefinition } from '../src/index.js'
 
 const base = {
   headline: 'x', body: null, imageUrl: null, ctaText: null, ctaUrl: null,
-  priority: 0, audience: { kind: 'everyone' as const },
+  priority: 0, audience: { kind: 'everyone' as const }, timedEventId: null,
 }
 const now = new Date('2026-07-15T12:00:00Z')
 const offers: OfferDefinition[] = [
@@ -29,5 +29,14 @@ describe('resolveOffer', () => {
   })
   it('returns null when nothing matches', () => {
     expect(resolveOffer('nonexistent', offers, now)).toBeNull()
+  })
+})
+
+describe('resolveOffer with event attachment', () => {
+  const attached: OfferDefinition = { ...base, id: 'event-offer', placementSlug: 'homepage-banner', startsAt: null, endsAt: null, priority: 99, timedEventId: 'e1' }
+  it('resolves attached offers only while their event is active', () => {
+    expect(resolveOffer('homepage-banner', [attached], now, new Set(['e1']))?.id).toBe('event-offer')
+    expect(resolveOffer('homepage-banner', [attached], now, new Set())).toBeNull()
+    expect(resolveOffer('homepage-banner', [attached], now)).toBeNull()
   })
 })
