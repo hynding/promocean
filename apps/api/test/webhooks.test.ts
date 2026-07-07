@@ -68,6 +68,7 @@ describe('WebhookDispatcher.deliver — group A (happy path + signing)', () => {
       const headers = init.headers as Record<string, string>
       expect(headers[WEBHOOK_SIGNATURE_HEADER]).toBe(expectedSig)
       expect(JSON.parse(rawBody)).toEqual(message)
+      expect(init.signal).toBeInstanceOf(AbortSignal)
     }
   })
 

@@ -48,6 +48,7 @@ export class WebhookDispatcher {
           method: 'POST',
           headers: { 'content-type': 'application/json', [WEBHOOK_SIGNATURE_HEADER]: signature },
           body: rawBody,
+          signal: AbortSignal.timeout(10_000),
         })
         if (res.status >= 500) {
           lastError = new Error(`webhook endpoint responded ${res.status}`)

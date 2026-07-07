@@ -79,17 +79,19 @@ export default {
       populate: ['project'],
     })
     ctx.body = {
-      events: rows.map((r: any) => ({
-        id: r.documentId,
-        name: r.name,
-        description: r.description ?? null,
-        startsAt: r.startsAt,
-        endsAt: r.endsAt,
-        endingSoonMinutes: r.endingSoonMinutes,
-        multiplier: r.multiplier,
-        enabled: r.enabled,
-        projectId: r.project?.documentId ?? null,
-      })),
+      events: rows
+        .filter((r: any) => r.project?.documentId)
+        .map((r: any) => ({
+          id: r.documentId,
+          name: r.name,
+          description: r.description ?? null,
+          startsAt: r.startsAt,
+          endsAt: r.endsAt,
+          endingSoonMinutes: r.endingSoonMinutes,
+          multiplier: r.multiplier,
+          enabled: r.enabled,
+          projectId: r.project.documentId,
+        })),
     }
   },
   async webhookEndpoints(ctx: any) {
