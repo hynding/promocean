@@ -1,0 +1,20 @@
+{
+  "name": "@promocean/sdk",
+  "version": "0.0.1",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "sideEffects": false,
+  "dependencies": { "@promocean/contracts": "workspace:*" },
+  "devDependencies": {
+    "@promocean/config": "workspace:*",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.0"
+  }
+}
