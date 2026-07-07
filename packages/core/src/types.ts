@@ -30,3 +30,19 @@ export interface AuthContext {
   environment: Environment
   keyType: 'publishable' | 'secret'
 }
+
+export type OfferAudience = { kind: 'everyone' }
+
+export interface OfferDefinition {
+  id: string
+  placementSlug: string
+  headline: string
+  body: string | null
+  imageUrl: string | null
+  ctaText: string | null
+  ctaUrl: string | null
+  startsAt: Date | null
+  endsAt: Date | null
+  priority: number
+  audience: OfferAudience
+}
