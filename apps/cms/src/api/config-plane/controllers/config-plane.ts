@@ -27,6 +27,31 @@ export default {
       })),
     }
   },
+  async offers(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const projectId = String(ctx.query.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
+    const rows = await strapi.documents('api::offer.offer').findMany({
+      filters: { project: { documentId: projectId } },
+      populate: ['placement'],
+    })
+    ctx.body = {
+      offers: rows
+        .filter((r: any) => r.placement?.slug)
+        .map((r: any) => ({
+          id: r.documentId,
+          placementSlug: r.placement.slug,
+          headline: r.headline,
+          body: r.body ?? null,
+          imageUrl: r.imageUrl ?? null,
+          ctaText: r.ctaText ?? null,
+          ctaUrl: r.ctaUrl ?? null,
+          startsAt: r.startsAt ?? null,
+          endsAt: r.endsAt ?? null,
+          priority: r.priority ?? 0,
+        })),
+    }
+  },
   async verifyKey(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()
     const { keyHash } = ctx.request.body ?? {}

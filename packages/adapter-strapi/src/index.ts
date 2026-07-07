@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore } from '@promocean/core'
+import type { AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, OfferDefinition } from '@promocean/core'
 
 export interface StrapiConfigPlaneOptions {
   baseUrl: string
@@ -14,6 +14,7 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   private readonly ttl: number
   private readonly fetchImpl: typeof fetch
   private achievementsCache = new Map<string, CacheEntry<AchievementDefinition[]>>()
+  private offersCache = new Map<string, CacheEntry<OfferDefinition[]>>()
   private authCache = new Map<string, CacheEntry<AuthContext | null>>()
 
   constructor(private opts: StrapiConfigPlaneOptions) {
@@ -39,6 +40,37 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
       return body.achievements
     } catch (err) {
       if (cached) return cached.value // stale-on-error
+      throw err
+    }
+  }
+
+  async getOffers(projectId: string): Promise<OfferDefinition[]> {
+    const cached = this.offersCache.get(projectId)
+    if (cached && cached.expires > Date.now()) return cached.value
+    try {
+      const res = await this.fetchImpl(
+        `${this.opts.baseUrl}/api/config-plane/offers?projectId=${encodeURIComponent(projectId)}`,
+        { headers: this.headers() },
+      )
+      if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+      const body = (await res.json()) as { offers: Array<Record<string, unknown>> }
+      const offers: OfferDefinition[] = body.offers.map((o) => ({
+        id: String(o.id),
+        placementSlug: String(o.placementSlug),
+        headline: String(o.headline),
+        body: (o.body as string | null) ?? null,
+        imageUrl: (o.imageUrl as string | null) ?? null,
+        ctaText: (o.ctaText as string | null) ?? null,
+        ctaUrl: (o.ctaUrl as string | null) ?? null,
+        startsAt: o.startsAt ? new Date(String(o.startsAt)) : null,
+        endsAt: o.endsAt ? new Date(String(o.endsAt)) : null,
+        priority: Number(o.priority ?? 0),
+        audience: { kind: 'everyone' },
+      }))
+      this.offersCache.set(projectId, { value: offers, expires: Date.now() + this.ttl })
+      return offers
+    } catch (err) {
+      if (cached) return cached.value
       throw err
     }
   }

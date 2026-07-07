@@ -54,6 +54,21 @@ export default {
         data: { ...a, artworkUrl: null, project: project.documentId },
       })
     }
+    const placement = await strapi.documents('api::placement.placement').create({
+      data: { name: 'Homepage Banner', slug: 'homepage-banner', project: project.documentId },
+    })
+    await strapi.documents('api::offer.offer').create({
+      data: {
+        name: 'Welcome offer',
+        headline: 'Welcome to Promocean',
+        body: 'Track achievements and run promos from one API.',
+        ctaText: 'Learn more',
+        ctaUrl: 'https://github.com/hynding/promocean',
+        priority: 0,
+        placement: placement.documentId,
+        project: project.documentId,
+      },
+    })
     if (process.env.LOG_PLAINTEXT_KEYS === 'true') {
       strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key ${rawKey}`)
     } else {

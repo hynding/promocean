@@ -1,15 +1,16 @@
 import type {
-  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, EventStore, ProgressStore, Scope, UsageStore,
+  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, EventStore, OfferDefinition, OfferMetricsStore,
+  ProgressStore, Scope, UsageStore,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
 
-export function makeFakes(definitions: AchievementDefinition[], auth: AuthContext | null) {
+export function makeFakes(definitions: AchievementDefinition[], auth: AuthContext | null, offers: OfferDefinition[] = []) {
   const seenIdem = new Set<string>()
   const progress = new Map<string, number>()
   const unlockDates = new Map<string, Date>()
   const usage: string[] = []
-  const configStore: ConfigStore = { getAchievements: async () => definitions }
+  const configStore: ConfigStore = { getAchievements: async () => definitions, getOffers: async () => offers }
   const apiKeyStore: ApiKeyStore = { verifyKey: async (raw) => (raw === 'pk_test_valid_key_1' ? auth : null) }
   const eventStore: EventStore = {
     insertEvent: async (s, e) => {
@@ -38,5 +39,10 @@ export function makeFakes(definitions: AchievementDefinition[], auth: AuthContex
         }),
   }
   const usageStore: UsageStore = { recordUsage: async (_s, u, m) => { usage.push(`${u}:${m}`) } }
-  return { configStore, apiKeyStore, eventStore, progressStore, usageStore, usage }
+  const metrics: { impressions: Array<{ offerId: string; userId: string | null }>; clicks: Array<{ offerId: string; userId: string | null }> } = { impressions: [], clicks: [] }
+  const offerMetricsStore: OfferMetricsStore = {
+    recordImpression: async (_s, offerId, userId) => { metrics.impressions.push({ offerId, userId }) },
+    recordClick: async (_s, offerId, userId) => { metrics.clicks.push({ offerId, userId }) },
+  }
+  return { configStore, apiKeyStore, eventStore, progressStore, usageStore, usage, offerMetricsStore, metrics }
 }

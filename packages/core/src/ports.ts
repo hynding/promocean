@@ -1,7 +1,8 @@
-import type { AchievementDefinition, AuthContext, Scope } from './types.js'
+import type { AchievementDefinition, AuthContext, OfferDefinition, Scope } from './types.js'
 
 export interface ConfigStore {
   getAchievements(projectId: string): Promise<AchievementDefinition[]>
+  getOffers(projectId: string): Promise<OfferDefinition[]>
 }
 
 export interface ApiKeyStore {
@@ -33,4 +34,9 @@ export interface ProgressStore {
 
 export interface UsageStore {
   recordUsage(scope: Scope, userId: string, month: string): Promise<void>
+}
+
+export interface OfferMetricsStore {
+  recordImpression(scope: Scope, offerId: string, userId: string | null, at: Date): Promise<void>
+  recordClick(scope: Scope, offerId: string, userId: string | null, at: Date): Promise<void>
 }

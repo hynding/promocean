@@ -61,3 +61,28 @@ describe('getAchievements', () => {
     expect(await c.getAchievements()).toEqual(body.achievements)
   })
 })
+
+const offerBody = { offer: { offerId: 'o1', headline: 'Welcome', body: null, imageUrl: null, ctaText: null, ctaUrl: null } }
+
+describe('offers', () => {
+  it('getPlacementOffer resolves with user attribution', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(offerBody))
+    const offer = await client(fetchImpl).getPlacementOffer('homepage-banner')
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/placements/homepage-banner/offer?userId=u1')
+    expect(offer?.offerId).toBe('o1')
+  })
+  it('getPlacementOffer returns null offers as null', async () => {
+    const c = client(vi.fn().mockImplementation(() => ok({ offer: null })))
+    expect(await c.getPlacementOffer('homepage-banner')).toBeNull()
+  })
+  it('clickOffer swallows errors', async () => {
+    const c = client(vi.fn().mockImplementation(() => Promise.reject(new Error('down'))), { maxRetries: 0 })
+    await expect(c.clickOffer('o1')).resolves.toBeUndefined()
+  })
+  it('dismissal persists in memory when localStorage is unavailable', () => {
+    const c = client(vi.fn())
+    expect(c.isOfferDismissed('o1')).toBe(false)
+    c.dismissOffer('o1')
+    expect(c.isOfferDismissed('o1')).toBe(true)
+  })
+})

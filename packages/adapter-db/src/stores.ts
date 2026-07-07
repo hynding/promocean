@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import type { EventStore, ProgressStore, Scope, UsageStore } from '@promocean/core'
-import { achievementProgress, events, monthlyActiveUsers, unlocks, usageCounters } from './schema.js'
+import type { EventStore, OfferMetricsStore, ProgressStore, Scope, UsageStore } from '@promocean/core'
+import { achievementProgress, events, monthlyActiveUsers, offerEvents, unlocks, usageCounters } from './schema.js'
 import type { Db } from './index.js'
 
 const scoped = (t: { projectId: any; environment: any }, s: Scope) =>
@@ -67,5 +67,15 @@ export class PgUsageStore implements UsageStore {
         target: [usageCounters.projectId, usageCounters.environment, usageCounters.month],
         set: { eventsCount: sql`${usageCounters.eventsCount} + 1` },
       })
+  }
+}
+
+export class PgOfferMetricsStore implements OfferMetricsStore {
+  constructor(private db: Db) {}
+  async recordImpression(scope: Scope, offerId: string, userId: string | null, at: Date) {
+    await this.db.insert(offerEvents).values({ ...scope, offerId, userId, kind: 'impression', createdAt: at })
+  }
+  async recordClick(scope: Scope, offerId: string, userId: string | null, at: Date) {
+    await this.db.insert(offerEvents).values({ ...scope, offerId, userId, kind: 'click', createdAt: at })
   }
 }

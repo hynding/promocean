@@ -1,7 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import { Promocean } from '@promocean/sdk'
-import { BadgeCabinet, PromoceanProvider, UnlockToast } from '@promocean/widgets'
+import { BadgeCabinet, Placement, PromoceanProvider, UnlockToast } from '@promocean/widgets'
 
 export function Demo({ userId }: { userId: string }) {
   const client = useMemo(() => new Promocean({
@@ -21,6 +21,7 @@ export function Demo({ userId }: { userId: string }) {
       <main style={{ maxWidth: 720, margin: '40px auto', fontFamily: 'system-ui, sans-serif' }}>
         <h1>Promocean Demo</h1>
         <p>User: <code>{userId}</code></p>
+        <Placement slug="homepage-banner" />
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
           <button disabled={busy} onClick={fire('lesson_completed')}>Complete a lesson</button>
           <button disabled={busy} onClick={fire('profile_completed')}>Complete profile</button>
