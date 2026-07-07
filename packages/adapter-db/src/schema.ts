@@ -54,3 +54,19 @@ export const offerEvents = runtime.table('offer_events', {
   kind: text('kind').notNull(), // 'impression' | 'click'
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
+
+export const timedEventNotifications = runtime.table('timed_event_notifications', {
+  projectId: text('project_id').notNull(),
+  eventId: text('event_id').notNull(),
+  transition: text('transition').notNull(),
+  firedAt: timestamp('fired_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [uniqueIndex('event_notif_uq').on(t.projectId, t.eventId, t.transition)])
+
+export const webhookDeadLetters = runtime.table('webhook_dead_letters', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: text('project_id').notNull(),
+  url: text('url').notNull(),
+  payload: text('payload').notNull(),
+  error: text('error').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+})
