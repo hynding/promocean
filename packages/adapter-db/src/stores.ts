@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import type { EventStore, OfferMetricsStore, ProgressStore, Scope, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
+import type { ErasureStore, EventStore, OfferMetricsStore, ProgressStore, Scope, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
 import { achievementProgress, events, monthlyActiveUsers, offerEvents, timedEventNotifications, unlocks, usageCounters, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
 
@@ -91,5 +91,31 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
   }
   async recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date) {
     await this.db.insert(webhookDeadLetters).values({ projectId, url, payload, error, createdAt: at })
+  }
+}
+
+export class PgErasureStore implements ErasureStore {
+  constructor(private db: Db) {}
+  async eraseUser(scope: Scope, userId: string) {
+    return this.db.transaction(async (tx) => {
+      const deletedEvents = await tx.delete(events)
+        .where(and(scoped(events, scope), eq(events.userId, userId)))
+        .returning({ id: events.id })
+      const deletedProgress = await tx.delete(achievementProgress)
+        .where(and(scoped(achievementProgress, scope), eq(achievementProgress.userId, userId)))
+        .returning({ achievementId: achievementProgress.achievementId })
+      const deletedUnlocks = await tx.delete(unlocks)
+        .where(and(scoped(unlocks, scope), eq(unlocks.userId, userId)))
+        .returning({ achievementId: unlocks.achievementId })
+      const deletedOfferEvents = await tx.delete(offerEvents)
+        .where(and(scoped(offerEvents, scope), eq(offerEvents.userId, userId)))
+        .returning({ id: offerEvents.id })
+      return {
+        events: deletedEvents.length,
+        progress: deletedProgress.length,
+        unlocks: deletedUnlocks.length,
+        offerEvents: deletedOfferEvents.length,
+      }
+    })
   }
 }

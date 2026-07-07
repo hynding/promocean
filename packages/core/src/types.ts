@@ -29,6 +29,7 @@ export interface AuthContext {
   projectId: string
   environment: Environment
   keyType: 'publishable' | 'secret'
+  allowedOrigins: string[] | null
 }
 
 export type OfferAudience = { kind: 'everyone' }
