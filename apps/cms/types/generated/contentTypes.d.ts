@@ -603,6 +603,7 @@ export interface ApiProjectProject extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    allowedOrigins: Schema.Attribute.JSON;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -701,7 +702,7 @@ export interface ApiWebhookEndpointWebhookEndpoint
       Schema.Attribute.Private;
     project: Schema.Attribute.Relation<'manyToOne', 'api::project.project'>;
     publishedAt: Schema.Attribute.DateTime;
-    secret: Schema.Attribute.String;
+    secret: Schema.Attribute.String & Schema.Attribute.Private;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
