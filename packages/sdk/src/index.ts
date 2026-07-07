@@ -14,6 +14,7 @@ export interface PromoceanOptions {
 export class PromoceanApiError extends Error {
   constructor(public code: string, message: string, public status: number) {
     super(`${code}: ${message}`)
+    this.name = 'PromoceanApiError'
   }
 }
 
@@ -39,6 +40,7 @@ export class Promocean {
 
   private async request(path: string, init?: RequestInit): Promise<Response> {
     let lastErr: unknown
+    let lastStatus: number | undefined
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 250 * 2 ** (attempt - 1)))
       try {
@@ -46,7 +48,7 @@ export class Promocean {
           ...init,
           headers: { authorization: `Bearer ${this.opts.publishableKey}`, 'content-type': 'application/json', ...init?.headers },
         })
-        if (res.status >= 500) { lastErr = new Error(`server ${res.status}`); continue }
+        if (res.status >= 500) { lastErr = new Error(`server ${res.status}`); lastStatus = res.status; continue }
         if (!res.ok) {
           const body = await res.json().catch(() => null) as { error?: { code: string; message: string } } | null
           throw new PromoceanApiError(body?.error?.code ?? 'internal_error', body?.error?.message ?? 'request failed', res.status)
@@ -57,6 +59,7 @@ export class Promocean {
         lastErr = err
       }
     }
+    if (lastStatus !== undefined) throw new PromoceanApiError('internal_error', `server responded ${lastStatus} after ${this.maxRetries + 1} attempts`, lastStatus)
     throw lastErr instanceof Error ? lastErr : new Error('request failed')
   }
 

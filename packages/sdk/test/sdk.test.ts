@@ -47,6 +47,11 @@ describe('track', () => {
     const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
     await expect(c.track('lesson_completed')).rejects.toThrow(/identify/)
   })
+  it('throws PromoceanApiError after exhausting 5xx retries', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('', { status: 503 })))
+    await expect(client(fetchImpl, { maxRetries: 1 }).track('lesson_completed')).rejects.toThrow('internal_error')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('getAchievements', () => {
