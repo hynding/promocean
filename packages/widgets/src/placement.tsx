@@ -2,6 +2,16 @@ import { useEffect, useState } from 'react'
 import type { OfferCreative } from '@promocean/contracts'
 import { usePromocean } from './provider.js'
 
+function safeHttpUrl(url: string | null): string | null {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
 export function Placement({ slug }: { slug: string }) {
   const client = usePromocean()
   const [offer, setOffer] = useState<OfferCreative | null>(null)
@@ -17,6 +27,9 @@ export function Placement({ slug }: { slug: string }) {
 
   if (!offer || dismissed || client.isOfferDismissed(offer.offerId)) return null
 
+  const ctaUrl = safeHttpUrl(offer.ctaUrl)
+  const imageUrl = safeHttpUrl(offer.imageUrl)
+
   return (
     <div data-promocean-placement={slug}
          style={{ position: 'relative', border: '1px solid #ddd', borderRadius: 8, padding: 16, fontFamily: 'system-ui, sans-serif' }}>
@@ -25,11 +38,11 @@ export function Placement({ slug }: { slug: string }) {
               style={{ position: 'absolute', top: 8, right: 8, border: 'none', background: 'none', cursor: 'pointer', fontSize: 16 }}>
         ×
       </button>
-      {offer.imageUrl ? <img src={offer.imageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 4 }} /> : null}
+      {imageUrl ? <img src={imageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 4 }} /> : null}
       <div style={{ fontWeight: 600 }}>{offer.headline}</div>
       {offer.body ? <div style={{ fontSize: 14, color: '#555', marginTop: 4 }}>{offer.body}</div> : null}
-      {offer.ctaUrl ? (
-        <a href={offer.ctaUrl} target="_blank" rel="noopener noreferrer"
+      {ctaUrl ? (
+        <a href={ctaUrl} target="_blank" rel="noopener noreferrer"
            onClick={() => { void client.clickOffer(offer.offerId) }}
            style={{ display: 'inline-block', marginTop: 8, fontWeight: 600 }}>
           {offer.ctaText ?? 'Learn more'}

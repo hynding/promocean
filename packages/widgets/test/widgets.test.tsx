@@ -67,7 +67,7 @@ describe('Placement', () => {
     render(<PromoceanProvider client={client}><Placement slug="homepage-banner" /></PromoceanProvider>)
     await waitFor(() => expect(screen.getByText('Welcome to Promocean')).toBeDefined())
     const cta = screen.getByRole('link', { name: 'Learn more' })
-    expect(cta.getAttribute('href')).toBe('https://example.com')
+    expect(cta.getAttribute('href')).toBe('https://example.com/')
     cta.addEventListener('click', (e) => e.preventDefault())
     act(() => { cta.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })) })
     expect(client.clickOffer).toHaveBeenCalledWith('o1')
@@ -87,5 +87,15 @@ describe('Placement', () => {
     act(() => { screen.getByRole('button', { name: 'Dismiss offer' }).click() })
     expect(client.dismissOffer).toHaveBeenCalledWith('o1')
     expect(screen.queryByText('Welcome to Promocean')).toBeNull()
+  })
+  it('refuses javascript: CTA and image URLs', async () => {
+    const { client } = fakeClient()
+    client.getPlacementOffer = vi.fn().mockResolvedValue({
+      ...offerCreative, ctaUrl: 'javascript:alert(1)', imageUrl: 'javascript:alert(2)',
+    })
+    render(<PromoceanProvider client={client}><Placement slug="homepage-banner" /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Welcome to Promocean')).toBeDefined())
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(document.querySelector('img')).toBeNull()
   })
 })
