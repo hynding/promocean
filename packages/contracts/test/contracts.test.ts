@@ -4,6 +4,7 @@ import {
   trackEventResponseSchema,
   errorEnvelopeSchema,
   EVENT_TYPE_PATTERN,
+  eraseUserResponseSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -39,5 +40,36 @@ describe('response and error schemas', () => {
   })
   it('exports the event type pattern', () => {
     expect(EVENT_TYPE_PATTERN.test('lesson_completed')).toBe(true)
+  })
+  it('accepts forbidden error code', () => {
+    const result = errorEnvelopeSchema.safeParse({ error: { code: 'forbidden', message: 'Access denied' } })
+    expect(result.success).toBe(true)
+  })
+})
+
+describe('eraseUserResponseSchema', () => {
+  it('round-trips a valid payload', () => {
+    const payload = {
+      erased: true,
+      counts: {
+        events: 42,
+        progress: 10,
+        unlocks: 5,
+        offerEvents: 3,
+      },
+    }
+    expect(eraseUserResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('rejects erased: false', () => {
+    const result = eraseUserResponseSchema.safeParse({
+      erased: false,
+      counts: {
+        events: 42,
+        progress: 10,
+        unlocks: 5,
+        offerEvents: 3,
+      },
+    })
+    expect(result.success).toBe(false)
   })
 })

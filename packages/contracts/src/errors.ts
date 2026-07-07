@@ -5,6 +5,7 @@ export const errorCodeSchema = z.enum([
   'invalid_payload',
   'rate_limited',
   'origin_not_allowed',
+  'forbidden',
   'not_found',
   'internal_error',
 ])
