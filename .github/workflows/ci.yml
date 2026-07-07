@@ -16,3 +16,39 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo run typecheck build
       - run: pnpm turbo run test
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      DATABASE_URL: postgres://promocean:promocean@localhost:5433/promocean
+      CONFIG_PLANE_SECRET: ci-config-secret
+      STRAPI_URL: http://localhost:1337
+      SEED_DEMO: "true"
+      APP_KEYS: ci-key-1,ci-key-2
+      API_TOKEN_SALT: ci-salt
+      ADMIN_JWT_SECRET: ci-admin-secret
+      TRANSFER_TOKEN_SALT: ci-transfer-salt
+      JWT_SECRET: ci-jwt-secret
+      ENCRYPTION_KEY: ci-encryption-key
+      LOG_PLAINTEXT_KEYS: "false"
+      NEXT_PUBLIC_PROMOCEAN_KEY: pk_test_demo_1234567890abcdef
+      NEXT_PUBLIC_PROMOCEAN_API: http://localhost:3001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: docker compose up -d postgres
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run build
+      - run: |
+          (cd apps/cms && pnpm develop &)
+          npx wait-on -t 120000 http://localhost:1337/_health
+      - run: |
+          (cd apps/api && pnpm start &)
+          npx wait-on -t 60000 http://localhost:3001/healthz
+      - run: pnpm --filter demo exec playwright install --with-deps chromium
+      - run: pnpm --filter demo e2e
