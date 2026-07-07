@@ -23,6 +23,11 @@ const app = createApp({
   offerMetricsStore: new PgOfferMetricsStore(db),
   erasureStore: new PgErasureStore(db),
   webhooks,
+  readiness: {
+    checkDb: async () => { await db.$client.query('select 1') },
+    // Cheap probe: getAllTimedEvents() hits a single, cached Strapi endpoint.
+    checkConfigPlane: async () => { await plane.getAllTimedEvents() },
+  },
 })
 const port = Number(process.env.API_PORT ?? 3001)
 serve({ fetch: app.fetch, port })

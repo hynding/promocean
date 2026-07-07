@@ -21,8 +21,22 @@ import type { WebhookDispatcher } from './webhooks.js'
 const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
 const { version: apiVersion } = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }
 
-// Built once at module load; served as a cached static object.
+// Built and serialized once at module load; served as a cached static string
+// so every request avoids re-walking/re-stringifying the document.
 const openApiDocument = buildOpenApiDocument(apiVersion)
+const openApiBody = JSON.stringify(openApiDocument)
+
+// Races an arbitrary promise against a timeout. AbortSignal.timeout() only
+// helps callers that accept a signal (e.g. fetch); our readiness checks are
+// plain promises, so we race them against a rejecting timer instead.
+function withTimeout(p: Promise<void>, ms: number): Promise<void> {
+  return Promise.race([
+    p,
+    new Promise<void>((_resolve, reject) => {
+      setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)
+    }),
+  ])
+}
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -39,6 +53,10 @@ export interface AppDeps {
   offerMetricsStore: OfferMetricsStore
   erasureStore: ErasureStore
   webhooks?: WebhookDispatcher
+  readiness?: {
+    checkDb: () => Promise<void>
+    checkConfigPlane: () => Promise<void>
+  }
 }
 
 export interface CreateAppOptions {
@@ -58,10 +76,25 @@ export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
     logger.info({ requestId, method: c.req.method, path: c.req.path, status: c.res.status, ms }, 'request')
   })
   app.get('/healthz', (c) => c.json({ ok: true }))
+  app.get('/readyz', async (c) => {
+    if (!deps.readiness) return c.json({ ok: true, checks: 'skipped' })
+    const { checkDb, checkConfigPlane } = deps.readiness
+    const checkNames = ['db', 'configPlane'] as const
+    const results = await Promise.allSettled([
+      withTimeout(checkDb(), 3000),
+      withTimeout(checkConfigPlane(), 3000),
+    ])
+    const failing = results.flatMap((result, i) => (result.status === 'rejected' ? [checkNames[i]] : []))
+    if (failing.length > 0) return c.json({ ok: false, failing }, 503)
+    return c.json({ ok: true })
+  })
   app.use('/v1/*', cors())
   // Registered before the rate-limit/auth middleware below so it is exempt
-  // from both (Hono runs matched handlers in registration order).
-  app.get('/v1/openapi.json', (c) => c.json(openApiDocument))
+  // from both (Hono runs matched handlers in registration order). The
+  // pre-serialized body is cacheable since the document never changes at runtime.
+  app.get('/v1/openapi.json', (c) =>
+    c.body(openApiBody, 200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' }),
+  )
   app.use('/v1/*', createRateLimiter(rateLimitPerMinute))
   app.use('/v1/*', authMiddleware(deps.apiKeyStore))
   app.route('/v1/events', eventsRoute(deps))
