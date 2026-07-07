@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { trackEventRequestSchema, type TrackEventResponse } from '@promocean/contracts'
-import { evaluateEvent, type Scope } from '@promocean/core'
+import { activeMultiplier, evaluateEvent, type Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
 
 export function eventsRoute(deps: AppDeps) {
@@ -23,7 +23,15 @@ export function eventsRoute(deps: AppDeps) {
     const definitions = await deps.configStore.getAchievements(scope.projectId)
     const relevant = definitions.filter((d) => d.eventType === type)
     const counts = await deps.progressStore.getCounts(scope, userId, relevant.map((d) => d.id))
-    const result = evaluateEvent({ userId, type, occurredAt }, definitions, counts)
+
+    let multiplier = 1
+    try {
+      multiplier = activeMultiplier(await deps.configStore.getTimedEvents(scope.projectId), occurredAt)
+    } catch (err) {
+      console.error('timed events fetch failed; defaulting multiplier to 1', err)
+    }
+
+    const result = evaluateEvent({ userId, type, occurredAt }, definitions, counts, multiplier)
 
     const unlockedAt = new Date()
     const unlocks: TrackEventResponse['unlocks'] = []

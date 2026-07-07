@@ -1,16 +1,27 @@
 import type {
   AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, EventStore, OfferDefinition, OfferMetricsStore,
-  ProgressStore, Scope, UsageStore,
+  ProgressStore, Scope, TimedEventDefinition, UsageStore,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
 
-export function makeFakes(definitions: AchievementDefinition[], auth: AuthContext | null, offers: OfferDefinition[] = []) {
+export function makeFakes(
+  definitions: AchievementDefinition[],
+  auth: AuthContext | null,
+  offers: OfferDefinition[] = [],
+  timedEvents: TimedEventDefinition[] = [],
+) {
   const seenIdem = new Set<string>()
   const progress = new Map<string, number>()
   const unlockDates = new Map<string, Date>()
   const usage: string[] = []
-  const configStore: ConfigStore = { getAchievements: async () => definitions, getOffers: async () => offers }
+  const configStore: ConfigStore = {
+    getAchievements: async () => definitions,
+    getOffers: async () => offers,
+    getTimedEvents: async () => timedEvents,
+    getAllTimedEvents: async () => [],
+    getWebhookEndpoints: async () => [],
+  }
   const apiKeyStore: ApiKeyStore = { verifyKey: async (raw) => (raw === 'pk_test_valid_key_1' ? auth : null) }
   const eventStore: EventStore = {
     insertEvent: async (s, e) => {

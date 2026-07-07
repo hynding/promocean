@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { PlacementOfferResponse } from '@promocean/contracts'
 import { PLACEMENT_SLUG_PATTERN } from '@promocean/contracts'
-import { resolveOffer, type Scope } from '@promocean/core'
+import { activeEventIds, resolveOffer, type Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
 
 export function placementsRoute(deps: AppDeps) {
@@ -19,7 +19,13 @@ export function placementsRoute(deps: AppDeps) {
     }
     const offers = await deps.configStore.getOffers(scope.projectId)
     const now = new Date()
-    const offer = resolveOffer(slug, offers, now)
+    let active: ReadonlySet<string> = new Set<string>()
+    try {
+      active = activeEventIds(await deps.configStore.getTimedEvents(scope.projectId), now)
+    } catch (err) {
+      console.error('timed events fetch failed; event-attached offers hidden', err)
+    }
+    const offer = resolveOffer(slug, offers, now, active)
     if (offer) {
       try {
         await deps.offerMetricsStore.recordImpression(scope, offer.id, userId, now)
