@@ -45,10 +45,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo run build
       - run: |
-          (cd apps/cms && pnpm develop &)
-          npx wait-on -t 120000 http://localhost:1337/_health
+          (cd apps/cms && pnpm start &)
+          npx wait-on@8.0.3 -t 180000 http://localhost:1337/_health
       - run: |
           (cd apps/api && pnpm start &)
-          npx wait-on -t 60000 http://localhost:3001/healthz
+          npx wait-on@8.0.3 -t 60000 http://localhost:3001/healthz
       - run: pnpm --filter demo exec playwright install --with-deps chromium
       - run: pnpm --filter demo e2e

@@ -7,6 +7,7 @@ Monorepo: pnpm + Turborepo. See `docs/superpowers/specs/` for the design spec.
 ## Quickstart (dev)
 
     corepack enable && pnpm install
+    pnpm build
     cp .env.example .env
     pnpm db:up
     pnpm dev
@@ -16,9 +17,15 @@ each need their own environment configured first — see below for a from-scratc
 setup that boots the full stack (cms + api + demo) and proves the achievement
 loop end to end.
 
+Note: `.env.example` sets `SEED_DEMO=true`, which seeds a publicly known demo
+publishable key (`pk_test_demo_…`) — fine for local dev and CI, but this must
+never be enabled in a staging or production environment.
+
 ### Running the full stack manually
 
-In three terminals, from the repo root:
+From the repo root, first run `pnpm install` then `pnpm build` (workspace packages
+must be built once so `cms`/`api`/`demo` can resolve each other's `dist/`). Then, in
+three terminals:
 
     # 1. Postgres + Strapi CMS (reads apps/cms/.env — see apps/cms/.env.example)
     pnpm db:up
