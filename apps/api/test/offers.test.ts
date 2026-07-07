@@ -36,6 +36,18 @@ describe('GET /v1/placements/:slug/offer', () => {
     expect(res.status).toBe(200)
     expect((await res.json()).offer?.offerId).toBe('o1')
   })
+  it('rejects an invalid placement slug', async () => {
+    const { app, fakes } = setup()
+    const res = await app.request('/v1/placements/Bad_Slug!/offer', { headers })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error.code).toBe('invalid_payload')
+    expect(fakes.metrics.impressions).toEqual([])
+  })
+  it('rejects an oversized userId query param', async () => {
+    const { app } = setup()
+    const res = await app.request(`/v1/placements/homepage-banner/offer?userId=${'x'.repeat(129)}`, { headers })
+    expect(res.status).toBe(400)
+  })
 })
 
 describe('POST /v1/offers/:id/click', () => {
@@ -50,5 +62,11 @@ describe('POST /v1/offers/:id/click', () => {
     const res = await app.request('/v1/offers/o1/click', { method: 'POST', headers, body: JSON.stringify({ userId: '' }) })
     expect(res.status).toBe(400)
     expect((await res.json()).error.code).toBe('invalid_payload')
+  })
+  it('rejects an oversized offer id', async () => {
+    const { app, fakes } = setup()
+    const res = await app.request(`/v1/offers/${'x'.repeat(129)}/click`, { method: 'POST', headers, body: JSON.stringify({}) })
+    expect(res.status).toBe(400)
+    expect(fakes.metrics.clicks).toEqual([])
   })
 })
