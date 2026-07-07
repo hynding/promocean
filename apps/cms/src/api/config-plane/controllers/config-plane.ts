@@ -33,7 +33,7 @@ export default {
     if (!projectId) return ctx.badRequest('projectId is required')
     const rows = await strapi.documents('api::offer.offer').findMany({
       filters: { project: { documentId: projectId } },
-      populate: ['placement'],
+      populate: ['placement', 'timedEvent'],
     })
     ctx.body = {
       offers: rows
@@ -49,7 +49,63 @@ export default {
           startsAt: r.startsAt ?? null,
           endsAt: r.endsAt ?? null,
           priority: r.priority ?? 0,
+          timedEventId: r.timedEvent?.documentId ?? null,
         })),
+    }
+  },
+  async timedEvents(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const projectId = String(ctx.query.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
+    const rows = await strapi.documents('api::timed-event.timed-event').findMany({
+      filters: { project: { documentId: projectId } },
+    })
+    ctx.body = {
+      events: rows.map((r: any) => ({
+        id: r.documentId,
+        name: r.name,
+        description: r.description ?? null,
+        startsAt: r.startsAt,
+        endsAt: r.endsAt,
+        endingSoonMinutes: r.endingSoonMinutes,
+        multiplier: r.multiplier,
+        enabled: r.enabled,
+      })),
+    }
+  },
+  async timedEventsAll(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const rows = await strapi.documents('api::timed-event.timed-event').findMany({
+      populate: ['project'],
+    })
+    ctx.body = {
+      events: rows.map((r: any) => ({
+        id: r.documentId,
+        name: r.name,
+        description: r.description ?? null,
+        startsAt: r.startsAt,
+        endsAt: r.endsAt,
+        endingSoonMinutes: r.endingSoonMinutes,
+        multiplier: r.multiplier,
+        enabled: r.enabled,
+        projectId: r.project?.documentId ?? null,
+      })),
+    }
+  },
+  async webhookEndpoints(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const projectId = String(ctx.query.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
+    const rows = await strapi.documents('api::webhook-endpoint.webhook-endpoint').findMany({
+      filters: { project: { documentId: projectId } },
+    })
+    ctx.body = {
+      endpoints: rows.map((r: any) => ({
+        id: r.documentId,
+        url: r.url,
+        secret: r.secret,
+        enabled: r.enabled,
+      })),
     }
   },
   async verifyKey(ctx: any) {

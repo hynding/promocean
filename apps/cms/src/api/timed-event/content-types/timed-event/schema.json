@@ -1,0 +1,17 @@
+{
+  "kind": "collectionType",
+  "collectionName": "timed_events",
+  "info": { "singularName": "timed-event", "pluralName": "timed-events", "displayName": "Timed Event" },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "description": { "type": "text" },
+    "startsAt": { "type": "datetime", "required": true },
+    "endsAt": { "type": "datetime", "required": true },
+    "endingSoonMinutes": { "type": "integer", "required": true, "min": 1, "default": 1440 },
+    "multiplier": { "type": "integer", "required": true, "min": 1, "default": 1 },
+    "enabled": { "type": "boolean", "required": true, "default": true },
+    "recurrence": { "type": "json" },
+    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
+  }
+}
