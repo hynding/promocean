@@ -55,3 +55,29 @@ describe('StrapiConfigPlane.verifyKey', () => {
     expect(await makePlane(fetchImpl).verifyKey('nope_key_123')).toBeNull()
   })
 })
+
+const offersBody = {
+  offers: [{
+    id: 'o1', placementSlug: 'homepage-banner', headline: 'Welcome to Promocean',
+    body: null, imageUrl: null, ctaText: 'Learn more', ctaUrl: 'https://example.com',
+    startsAt: '2026-07-01T00:00:00.000Z', endsAt: null, priority: 0,
+  }],
+}
+
+describe('StrapiConfigPlane.getOffers', () => {
+  it('fetches, maps dates to Date|null, and injects audience', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(offersBody))
+    const offers = await makePlane(fetchImpl).getOffers('p1')
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://cms.test/api/config-plane/offers?projectId=p1')
+    expect(offers[0]).toMatchObject({ id: 'o1', placementSlug: 'homepage-banner', endsAt: null, audience: { kind: 'everyone' } })
+    expect(offers[0].startsAt).toEqual(new Date('2026-07-01T00:00:00.000Z'))
+  })
+  it('caches within TTL and serves stale on error', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(offersBody))
+      .mockImplementation(() => Promise.reject(new Error('down')))
+    const plane = makePlane(fetchImpl, 0)
+    await plane.getOffers('p1')
+    expect((await plane.getOffers('p1'))[0].id).toBe('o1')
+  })
+})
