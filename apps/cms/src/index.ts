@@ -1,8 +1,33 @@
 import { createHash } from 'node:crypto'
 
+async function seedAdminUser(strapi: any) {
+  const { ADMIN_FIRST_NAME, ADMIN_LAST_NAME, ADMIN_EMAIL, ADMIN_PASSWORD } = process.env
+  if (!ADMIN_FIRST_NAME || !ADMIN_LAST_NAME || !ADMIN_EMAIL || !ADMIN_PASSWORD) return
+  const userService = strapi.service('admin::user')
+  const hasAdmin = await userService.exists()
+  if (hasAdmin) return
+  const superAdminRole = await strapi.service('admin::role').getSuperAdmin()
+  if (!superAdminRole) {
+    strapi.log.warn('[promocean] no super admin role found; skipping admin seed')
+    return
+  }
+  // createFirstAdmin is the same service method Strapi's own
+  // /admin/register-admin endpoint uses: it hashes the password, sets
+  // isActive/roles, and transactionally guards against a duplicate admin.
+  await userService.createFirstAdmin({
+    firstname: ADMIN_FIRST_NAME,
+    lastname: ADMIN_LAST_NAME,
+    email: ADMIN_EMAIL,
+    password: ADMIN_PASSWORD,
+  })
+  strapi.log.info(`[promocean] Seeded admin user ${ADMIN_EMAIL}`)
+}
+
 export default {
   register() {},
   async bootstrap({ strapi }: { strapi: any }) {
+    await seedAdminUser(strapi)
+
     if (process.env.SEED_DEMO !== 'true') return
     const existing = await strapi.documents('api::project.project').findMany({ limit: 1 })
     if (existing.length > 0) return
