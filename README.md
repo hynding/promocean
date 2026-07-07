@@ -69,6 +69,31 @@ cms + api already running (per above):
 This is also run in CI as the `e2e` job in `.github/workflows/ci.yml`, which
 boots Postgres, cms, and api with throwaway secrets before running the spec.
 
+## API surface
+
+All `/v1/*` routes require `Authorization: Bearer <key>` (a publishable
+`pk_...` or secret `sk_...` key from the CMS). `GET /v1/openapi.json` is the
+one unauthenticated route — it's registered before the auth/rate-limit
+middleware so tooling can fetch the spec without a key.
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| POST | `/v1/events` | pk or sk | Track a user event; evaluates achievement progress/unlocks and applies any active timed-event multiplier. |
+| GET | `/v1/users/:userId/achievements` | pk or sk | Fetch a user's full achievement status (locked and unlocked). |
+| DELETE | `/v1/users/:userId` | sk only | Erase a user's stored data (GDPR-style right-to-erasure). Rejected with `403 forbidden` for publishable keys. |
+| GET | `/v1/placements/:slug/offer` | pk or sk | Fetch the active offer creative for a placement slug (or `null`), recording an impression. |
+| POST | `/v1/offers/:id/click` | pk or sk | Record a click on an offer's CTA. |
+| GET | `/v1/events/live` | pk or sk | List scheduled/live/ending-soon timed events and their multipliers. |
+| GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
+
+Every key is rate-limited independently at `RATE_LIMIT_PER_MINUTE` requests
+per minute (default `300`; single-instance in-memory bucket, keyed by a hash
+of the key), returning `429 rate_limited` with a `retry-after` header once
+exceeded. Publishable keys additionally enforce an `allowedOrigins`
+allowlist when one is configured on the key: requests carrying an `Origin`
+header not on that list are rejected with `403 origin_not_allowed` (secret
+keys, and requests with no `Origin` header, are exempt from this check).
+
 ## Publishing
 
 MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) publish via a two-step manual flow:
