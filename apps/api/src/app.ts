@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import type { ApiKeyStore, ConfigStore, EventStore, OfferMetricsStore, ProgressStore, UsageStore } from '@promocean/core'
+import type { ApiKeyStore, ConfigStore, ErasureStore, EventStore, OfferMetricsStore, ProgressStore, UsageStore } from '@promocean/core'
 import { authMiddleware } from './auth.js'
+import { createRateLimiter } from './rate-limit.js'
 import { eventsRoute } from './routes/events.js'
 import { liveEventsRoute } from './routes/live-events.js'
 import { offersRoute } from './routes/offers.js'
@@ -16,13 +17,20 @@ export interface AppDeps {
   progressStore: ProgressStore
   usageStore: UsageStore
   offerMetricsStore: OfferMetricsStore
+  erasureStore: ErasureStore
   webhooks?: WebhookDispatcher
 }
 
-export function createApp(deps: AppDeps) {
+export interface CreateAppOptions {
+  rateLimitPerMinute?: number
+}
+
+export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
+  const rateLimitPerMinute = opts.rateLimitPerMinute ?? Number(process.env.RATE_LIMIT_PER_MINUTE ?? 300)
   const app = new Hono()
   app.get('/healthz', (c) => c.json({ ok: true }))
   app.use('/v1/*', cors())
+  app.use('/v1/*', createRateLimiter(rateLimitPerMinute))
   app.use('/v1/*', authMiddleware(deps.apiKeyStore))
   app.route('/v1/events', eventsRoute(deps))
   app.route('/v1/events', liveEventsRoute(deps))

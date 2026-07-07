@@ -1,10 +1,23 @@
 import { Hono } from 'hono'
-import type { UserAchievementsResponse } from '@promocean/contracts'
+import type { EraseUserResponse, UserAchievementsResponse } from '@promocean/contracts'
 import type { Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
 
 export function usersRoute(deps: AppDeps) {
   const app = new Hono()
+  app.delete('/:userId', async (c) => {
+    const auth = c.get('auth')
+    if (auth.keyType !== 'secret') {
+      return c.json({ error: { code: 'forbidden', message: 'Secret key required.' } }, 403)
+    }
+    const userId = c.req.param('userId')
+    if (userId.length < 1 || userId.length > 128) {
+      return c.json({ error: { code: 'invalid_payload', message: 'Invalid userId.' } }, 400)
+    }
+    const scope: Scope = { projectId: auth.projectId, environment: auth.environment }
+    const counts = await deps.erasureStore.eraseUser(scope, userId)
+    return c.json({ erased: true, counts } satisfies EraseUserResponse)
+  })
   app.get('/:userId/achievements', async (c) => {
     const auth = c.get('auth')
     const scope: Scope = { projectId: auth.projectId, environment: auth.environment }

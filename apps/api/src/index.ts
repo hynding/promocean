@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server'
-import { createDb, runMigrations, PgEventStore, PgOfferMetricsStore, PgProgressStore, PgUsageStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
+import { createDb, runMigrations, PgErasureStore, PgEventStore, PgOfferMetricsStore, PgProgressStore, PgUsageStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
 import { StrapiConfigPlane } from '@promocean/adapter-strapi'
 import { createApp } from './app.js'
 import { WebhookDispatcher, startLifecycleScheduler } from './webhooks.js'
@@ -20,6 +20,7 @@ const app = createApp({
   progressStore: new PgProgressStore(db),
   usageStore: new PgUsageStore(db),
   offerMetricsStore: new PgOfferMetricsStore(db),
+  erasureStore: new PgErasureStore(db),
   webhooks,
 })
 const port = Number(process.env.API_PORT ?? 3001)

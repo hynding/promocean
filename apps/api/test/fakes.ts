@@ -1,6 +1,6 @@
 import type {
-  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, EventStore, OfferDefinition, OfferMetricsStore,
-  ProgressStore, Scope, TimedEventDefinition, UsageStore,
+  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, ErasureStore, EventStore, OfferDefinition,
+  OfferMetricsStore, ProgressStore, Scope, TimedEventDefinition, UsageStore,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
@@ -55,5 +55,13 @@ export function makeFakes(
     recordImpression: async (_s, offerId, userId) => { metrics.impressions.push({ offerId, userId }) },
     recordClick: async (_s, offerId, userId) => { metrics.clicks.push({ offerId, userId }) },
   }
-  return { configStore, apiKeyStore, eventStore, progressStore, usageStore, usage, offerMetricsStore, metrics }
+  const erasedUsers: Array<{ scope: Scope; userId: string }> = []
+  const erasureCounts = { events: 1, progress: 2, unlocks: 3, offerEvents: 4 }
+  const erasureStore: ErasureStore = {
+    eraseUser: async (scope, userId) => {
+      erasedUsers.push({ scope, userId })
+      return erasureCounts
+    },
+  }
+  return { configStore, apiKeyStore, eventStore, progressStore, usageStore, usage, offerMetricsStore, metrics, erasureStore, erasedUsers, erasureCounts }
 }

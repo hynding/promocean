@@ -178,8 +178,20 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         headers: this.headers(),
         body: JSON.stringify({ keyHash }),
       })
-      const value = res.status === 404 ? null : res.ok ? ((await res.json()) as AuthContext) : null
-      if (!res.ok && res.status !== 404) throw new Error(`config plane responded ${res.status}`)
+      let value: AuthContext | null = null
+      if (res.status !== 404) {
+        if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+        const body = (await res.json()) as Record<string, unknown>
+        value = {
+          projectId: String(body.projectId),
+          environment: body.environment as AuthContext['environment'],
+          keyType: body.keyType as AuthContext['keyType'],
+          allowedOrigins:
+            Array.isArray(body.allowedOrigins) && body.allowedOrigins.every((o) => typeof o === 'string')
+              ? (body.allowedOrigins as string[])
+              : null,
+        }
+      }
       this.authCache.set(keyHash, { value, expires: Date.now() + this.ttl })
       return value
     } catch (err) {
