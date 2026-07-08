@@ -111,6 +111,17 @@ describe('recordImpression', () => {
     const k2 = JSON.parse(fetchImpl.mock.calls[1][1].body).impressionId
     expect(k1).toBe(k2)
   })
+  it('swallows errors from crypto.randomUUID (insecure context)', async () => {
+    const fetchImpl = vi.fn()
+    const spy = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => { throw new Error('insecure context') })
+    try {
+      const c = client(fetchImpl)
+      await expect(c.recordImpression('o1')).resolves.toBeUndefined()
+      expect(fetchImpl).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
 
 describe('getStats', () => {

@@ -119,12 +119,12 @@ export class Promocean {
   }
 
   async recordImpression(offerId: string): Promise<void> {
-    // Generate the impressionId once, outside the retry loop: request() retries
-    // reuse this same request body/init, so every attempt for this one logical
-    // impression carries the same key and the server dedupes them as one.
-    const impressionId = crypto.randomUUID()
-    const body = JSON.stringify({ impressionId, ...(this.userId ? { userId: this.userId } : {}) })
     try {
+      // Generate the impressionId once, outside the retry loop: request() retries
+      // reuse this same request body/init, so every attempt for this one logical
+      // impression carries the same key and the server dedupes them as one.
+      const impressionId = crypto.randomUUID()
+      const body = JSON.stringify({ impressionId, ...(this.userId ? { userId: this.userId } : {}) })
       await this.request(`/v1/offers/${encodeURIComponent(offerId)}/impression`, { method: 'POST', body })
     } catch {
       // fire-and-forget: a failed impression beacon must never break the host page
