@@ -1,0 +1,43 @@
+# Keep the Docker build context lean and reproducible. The pruner stage rebuilds
+# node_modules from the committed lockfile, so nothing installed/generated locally
+# should leak into the image or bust layer caching.
+node_modules
+**/node_modules
+
+# VCS / tooling
+.git
+.github
+.changeset
+.remember
+.claude
+.superpowers
+docs
+
+# Build outputs (regenerated inside the image)
+dist
+**/dist
+.next
+**/.next
+.turbo
+**/.turbo
+apps/cms/build
+apps/cms/.strapi
+apps/cms/.cache
+apps/cms/.tmp
+
+# Test / local artifacts
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+coverage
+
+# Local env files — images get config via compose, never baked secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# Editor / OS cruft
+.DS_Store
+*.log
