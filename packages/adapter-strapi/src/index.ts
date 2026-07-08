@@ -8,6 +8,16 @@ import type {
   TimedEventDefinition,
   WebhookEndpointDefinition,
 } from '@promocean/core'
+import type { z } from 'zod'
+import {
+  achievementsResponseSchema,
+  allTimedEventsResponseSchema,
+  eventTypesResponseSchema,
+  offersResponseSchema,
+  timedEventsResponseSchema,
+  verifyKeyResponseSchema,
+  webhookEndpointsResponseSchema,
+} from './schemas.js'
 
 export interface StrapiConfigPlaneOptions {
   baseUrl: string
@@ -18,6 +28,16 @@ export interface StrapiConfigPlaneOptions {
 
 interface CacheEntry<T> { value: T; expires: number }
 
+/** Parses `data` against `schema`; a validation failure is treated exactly like a failed
+ * fetch (throws) so callers' existing TTL stale-on-error path applies uniformly. */
+function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
+  const parsed = schema.safeParse(data)
+  if (!parsed.success) {
+    throw new Error(`config plane response failed validation: ${parsed.error.message}`)
+  }
+  return parsed.data
+}
+
 export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   private readonly ttl: number
   private readonly fetchImpl: typeof fetch
@@ -27,6 +47,7 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   private timedEventsCache = new Map<string, CacheEntry<TimedEventDefinition[]>>()
   private allTimedEventsCache = new Map<string, CacheEntry<Array<TimedEventDefinition & { projectId: string }>>>()
   private webhookEndpointsCache = new Map<string, CacheEntry<WebhookEndpointDefinition[]>>()
+  private eventTypesCache = new Map<string, CacheEntry<string[]>>()
 
   constructor(private opts: StrapiConfigPlaneOptions) {
     this.ttl = opts.cacheTtlMs ?? 30_000
@@ -34,7 +55,11 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   }
 
   private headers() {
-    return { 'x-config-secret': this.opts.configSecret, 'content-type': 'application/json' }
+    return { 'x-config-secret': this.opts.configSecret }
+  }
+
+  private jsonHeaders() {
+    return { ...this.headers(), 'content-type': 'application/json' }
   }
 
   async getAchievements(projectId: string): Promise<AchievementDefinition[]> {
@@ -46,7 +71,7 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         { headers: this.headers() },
       )
       if (!res.ok) throw new Error(`config plane responded ${res.status}`)
-      const body = (await res.json()) as { achievements: AchievementDefinition[] }
+      const body = parseOrThrow(achievementsResponseSchema, await res.json())
       this.achievementsCache.set(projectId, { value: body.achievements, expires: Date.now() + this.ttl })
       return body.achievements
     } catch (err) {
@@ -64,20 +89,20 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         { headers: this.headers() },
       )
       if (!res.ok) throw new Error(`config plane responded ${res.status}`)
-      const body = (await res.json()) as { offers: Array<Record<string, unknown>> }
+      const body = parseOrThrow(offersResponseSchema, await res.json())
       const offers: OfferDefinition[] = body.offers.map((o) => ({
-        id: String(o.id),
-        placementSlug: String(o.placementSlug),
-        headline: String(o.headline),
-        body: (o.body as string | null) ?? null,
-        imageUrl: (o.imageUrl as string | null) ?? null,
-        ctaText: (o.ctaText as string | null) ?? null,
-        ctaUrl: (o.ctaUrl as string | null) ?? null,
-        startsAt: o.startsAt ? new Date(String(o.startsAt)) : null,
-        endsAt: o.endsAt ? new Date(String(o.endsAt)) : null,
-        priority: Number(o.priority ?? 0),
+        id: o.id,
+        placementSlug: o.placementSlug,
+        headline: o.headline,
+        body: o.body,
+        imageUrl: o.imageUrl,
+        ctaText: o.ctaText,
+        ctaUrl: o.ctaUrl,
+        startsAt: o.startsAt ? new Date(o.startsAt) : null,
+        endsAt: o.endsAt ? new Date(o.endsAt) : null,
+        priority: o.priority,
         audience: { kind: 'everyone' },
-        timedEventId: (o.timedEventId as string | null) ?? null,
+        timedEventId: o.timedEventId,
       }))
       this.offersCache.set(projectId, { value: offers, expires: Date.now() + this.ttl })
       return offers
@@ -96,16 +121,16 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         { headers: this.headers() },
       )
       if (!res.ok) throw new Error(`config plane responded ${res.status}`)
-      const body = (await res.json()) as { events: Array<Record<string, unknown>> }
+      const body = parseOrThrow(timedEventsResponseSchema, await res.json())
       const events: TimedEventDefinition[] = body.events.map((e) => ({
-        id: String(e.id),
-        name: String(e.name),
-        description: (e.description as string | null) ?? null,
-        startsAt: new Date(String(e.startsAt)),
-        endsAt: new Date(String(e.endsAt)),
-        endingSoonMinutes: Number(e.endingSoonMinutes ?? 1440),
-        multiplier: Number(e.multiplier ?? 1),
-        enabled: Boolean(e.enabled),
+        id: e.id,
+        name: e.name,
+        description: e.description,
+        startsAt: new Date(e.startsAt),
+        endsAt: new Date(e.endsAt),
+        endingSoonMinutes: e.endingSoonMinutes,
+        multiplier: e.multiplier,
+        enabled: e.enabled,
       }))
       this.timedEventsCache.set(projectId, { value: events, expires: Date.now() + this.ttl })
       return events
@@ -124,17 +149,17 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         headers: this.headers(),
       })
       if (!res.ok) throw new Error(`config plane responded ${res.status}`)
-      const body = (await res.json()) as { events: Array<Record<string, unknown>> }
+      const body = parseOrThrow(allTimedEventsResponseSchema, await res.json())
       const events: Array<TimedEventDefinition & { projectId: string }> = body.events.map((e) => ({
-        id: String(e.id),
-        projectId: String(e.projectId),
-        name: String(e.name),
-        description: (e.description as string | null) ?? null,
-        startsAt: new Date(String(e.startsAt)),
-        endsAt: new Date(String(e.endsAt)),
-        endingSoonMinutes: Number(e.endingSoonMinutes ?? 1440),
-        multiplier: Number(e.multiplier ?? 1),
-        enabled: Boolean(e.enabled),
+        id: e.id,
+        projectId: e.projectId,
+        name: e.name,
+        description: e.description,
+        startsAt: new Date(e.startsAt),
+        endsAt: new Date(e.endsAt),
+        endingSoonMinutes: e.endingSoonMinutes,
+        multiplier: e.multiplier,
+        enabled: e.enabled,
       }))
       this.allTimedEventsCache.set(key, { value: events, expires: Date.now() + this.ttl })
       return events
@@ -153,15 +178,33 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         { headers: this.headers() },
       )
       if (!res.ok) throw new Error(`config plane responded ${res.status}`)
-      const body = (await res.json()) as { endpoints: Array<Record<string, unknown>> }
+      const body = parseOrThrow(webhookEndpointsResponseSchema, await res.json())
       const endpoints: WebhookEndpointDefinition[] = body.endpoints.map((e) => ({
-        id: String(e.id),
-        url: String(e.url),
-        secret: String(e.secret),
-        enabled: Boolean(e.enabled),
+        id: e.id,
+        url: e.url,
+        secret: e.secret,
+        enabled: e.enabled,
       }))
       this.webhookEndpointsCache.set(projectId, { value: endpoints, expires: Date.now() + this.ttl })
       return endpoints
+    } catch (err) {
+      if (cached) return cached.value
+      throw err
+    }
+  }
+
+  async getRegisteredEventTypes(projectId: string): Promise<string[]> {
+    const cached = this.eventTypesCache.get(projectId)
+    if (cached && cached.expires > Date.now()) return cached.value
+    try {
+      const res = await this.fetchImpl(
+        `${this.opts.baseUrl}/api/config-plane/projects/${encodeURIComponent(projectId)}/event-types`,
+        { headers: this.headers() },
+      )
+      if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+      const body = parseOrThrow(eventTypesResponseSchema, await res.json())
+      this.eventTypesCache.set(projectId, { value: body.eventTypes, expires: Date.now() + this.ttl })
+      return body.eventTypes
     } catch (err) {
       if (cached) return cached.value
       throw err
@@ -175,23 +218,37 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
     try {
       const res = await this.fetchImpl(`${this.opts.baseUrl}/api/config-plane/verify-key`, {
         method: 'POST',
-        headers: this.headers(),
+        headers: this.jsonHeaders(),
         body: JSON.stringify({ keyHash }),
       })
       let value: AuthContext | null = null
       if (res.status !== 404) {
         if (!res.ok) throw new Error(`config plane responded ${res.status}`)
-        const body = (await res.json()) as Record<string, unknown>
-        value = {
-          projectId: String(body.projectId),
-          environment: body.environment as AuthContext['environment'],
-          keyType: body.keyType as AuthContext['keyType'],
-          allowedOrigins:
-            Array.isArray(body.allowedOrigins) && body.allowedOrigins.every((o) => typeof o === 'string')
-              ? (body.allowedOrigins as string[])
-              : null,
+        // A parse failure here (including a bad environment/keyType enum) means the CMS
+        // record is unusable — fail closed to `null` auth rather than throw, and rather
+        // than ever construct a corrupt AuthContext.
+        const parsed = verifyKeyResponseSchema.safeParse(await res.json())
+        if (parsed.success) {
+          const { allowedOrigins } = parsed.data
+          value = {
+            projectId: parsed.data.projectId,
+            environment: parsed.data.environment,
+            keyType: parsed.data.keyType,
+            allowedOrigins:
+              Array.isArray(allowedOrigins) && allowedOrigins.every((o) => typeof o === 'string')
+                ? (allowedOrigins as string[])
+                : null,
+          }
+        } else {
+          console.warn(
+            '[promocean:adapter-strapi] verify-key response failed validation; treating key as invalid',
+            { issues: parsed.error.issues },
+          )
         }
       }
+      // Deliberate fail-closed trade-off: caching `null` here overwrites even a previously-good
+      // cached AuthContext for one TTL window if the CMS starts returning malformed bodies
+      // (auth boundary: correctness over availability).
       this.authCache.set(keyHash, { value, expires: Date.now() + this.ttl })
       return value
     } catch (err) {

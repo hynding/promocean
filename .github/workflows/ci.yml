@@ -34,6 +34,7 @@ jobs:
       LOG_PLAINTEXT_KEYS: "false"
       NEXT_PUBLIC_PROMOCEAN_KEY: pk_test_demo_1234567890abcdef
       NEXT_PUBLIC_PROMOCEAN_API: http://localhost:3001
+      PROMOCEAN_SECRET_KEY: sk_test_demo_1234567890abcdef
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

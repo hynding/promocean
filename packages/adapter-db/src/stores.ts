@@ -1,5 +1,5 @@
-import { and, eq, inArray, sql } from 'drizzle-orm'
-import type { ErasureStore, EventStore, OfferMetricsStore, ProgressStore, Scope, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
+import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm'
+import type { ErasureStore, EventStore, IngestionStore, OfferMetricsStore, ProgressStore, Scope, StatsStore, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
 import { achievementProgress, events, monthlyActiveUsers, offerEvents, timedEventNotifications, unlocks, usageCounters, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
 
@@ -70,13 +70,155 @@ export class PgUsageStore implements UsageStore {
   }
 }
 
+export class PgIngestionStore implements IngestionStore {
+  constructor(private db: Db) {}
+  async ingestEvent(
+    scope: Scope,
+    event: { userId: string; type: string; idempotencyKey: string; occurredAt: Date; meta?: Record<string, unknown> },
+    increments: { achievementId: string; delta: number; target: number }[],
+    month: string,
+  ) {
+    return this.db.transaction(async (tx) => {
+      const insertedEvent = await tx.insert(events)
+        .values({ ...scope, ...event })
+        .onConflictDoNothing()
+        .returning({ id: events.id })
+      if (insertedEvent.length === 0) return { deduped: true as const }
+
+      const progress: { achievementId: string; current: number; target: number }[] = []
+      for (const inc of increments) {
+        const [row] = await tx.insert(achievementProgress)
+          .values({
+            ...scope,
+            userId: event.userId,
+            achievementId: inc.achievementId,
+            current: sql`LEAST(${inc.delta}::int, ${inc.target}::int)`,
+          })
+          .onConflictDoUpdate({
+            target: [achievementProgress.projectId, achievementProgress.environment, achievementProgress.userId, achievementProgress.achievementId],
+            set: {
+              current: sql`LEAST(${achievementProgress.current} + ${inc.delta}::int, ${inc.target}::int)`,
+              updatedAt: sql`now()`,
+            },
+          })
+          .returning({ current: achievementProgress.current })
+        progress.push({ achievementId: inc.achievementId, current: row!.current, target: inc.target })
+      }
+
+      // Computed once, shared by every unlock inserted in this call — every unlock crossed
+      // its target in the same instant as far as this ingestion is concerned.
+      const unlockedAt = new Date()
+      const newUnlocks: { achievementId: string; unlockedAt: Date }[] = []
+      for (const p of progress) {
+        if (p.current < p.target) continue
+        const insertedUnlock = await tx.insert(unlocks)
+          .values({ ...scope, userId: event.userId, achievementId: p.achievementId, unlockedAt })
+          .onConflictDoNothing()
+          .returning({ achievementId: unlocks.achievementId })
+        if (insertedUnlock.length > 0) newUnlocks.push({ achievementId: p.achievementId, unlockedAt })
+      }
+
+      await tx.insert(monthlyActiveUsers).values({ ...scope, month, userId: event.userId }).onConflictDoNothing()
+      await tx.insert(usageCounters).values({ ...scope, month, eventsCount: 1 })
+        .onConflictDoUpdate({
+          target: [usageCounters.projectId, usageCounters.environment, usageCounters.month],
+          set: { eventsCount: sql`${usageCounters.eventsCount} + 1` },
+        })
+
+      return { deduped: false as const, progress, newUnlocks }
+    })
+  }
+}
+
 export class PgOfferMetricsStore implements OfferMetricsStore {
   constructor(private db: Db) {}
-  async recordImpression(scope: Scope, offerId: string, userId: string | null, at: Date) {
-    await this.db.insert(offerEvents).values({ ...scope, offerId, userId, kind: 'impression', createdAt: at })
+  async recordImpression(scope: Scope, offerId: string, userId: string | null, at: Date, idempotencyKey: string) {
+    // The partial unique index (project_id, environment, idempotency_key) WHERE kind =
+    // 'impression' AND idempotency_key IS NOT NULL absorbs beacon retries/duplicates.
+    await this.db.insert(offerEvents)
+      .values({ ...scope, offerId, userId, kind: 'impression', createdAt: at, idempotencyKey })
+      .onConflictDoNothing()
   }
   async recordClick(scope: Scope, offerId: string, userId: string | null, at: Date) {
     await this.db.insert(offerEvents).values({ ...scope, offerId, userId, kind: 'click', createdAt: at })
+  }
+}
+
+const rangeConds = (col: { name?: string } & Parameters<typeof gte>[0], range: { from: Date | null; to: Date | null }) => {
+  const conds = []
+  if (range.from) conds.push(gte(col, range.from))
+  if (range.to) conds.push(lte(col, range.to))
+  return conds
+}
+
+export class PgStatsStore implements StatsStore {
+  constructor(private db: Db) {}
+  async getStats(
+    scope: Scope,
+    range: { from: Date | null; to: Date | null },
+    timedEventWindows: { eventId: string; startsAt: Date; endsAt: Date }[],
+  ) {
+    const [eventCountRows, achievementRows, offerRows, timedEventRows, totalParticipants] = await Promise.all([
+      this.db.select({ count: sql<number>`count(*)::int` }).from(events)
+        .where(and(scoped(events, scope), ...rangeConds(events.occurredAt, range))),
+      this.db.select({ achievementId: unlocks.achievementId, unlocks: sql<number>`count(*)::int` })
+        .from(unlocks)
+        .where(and(scoped(unlocks, scope), ...rangeConds(unlocks.unlockedAt, range)))
+        .groupBy(unlocks.achievementId),
+      this.db.select({ offerId: offerEvents.offerId, kind: offerEvents.kind, count: sql<number>`count(*)::int` })
+        .from(offerEvents)
+        .where(and(scoped(offerEvents, scope), ...rangeConds(offerEvents.createdAt, range)))
+        .groupBy(offerEvents.offerId, offerEvents.kind),
+      Promise.all(timedEventWindows.map(async (w) => {
+        // Range intersected with window: GREATEST/LEAST ignore null args, so a null
+        // range.from/to simply falls back to the window's own bound.
+        const result = await this.db.execute<{ n: number }>(sql`
+          select count(distinct user_id)::int as n
+          from runtime.events
+          where project_id = ${scope.projectId} and environment = ${scope.environment}
+            and occurred_at between GREATEST(${w.startsAt}::timestamptz, ${range.from}::timestamptz)
+                                 and LEAST(${w.endsAt}::timestamptz, ${range.to}::timestamptz)
+        `)
+        return { eventId: w.eventId, participants: Number(result.rows[0]?.n ?? 0) }
+      })),
+      (async () => {
+        if (timedEventWindows.length === 0) return 0
+        const windowConds = timedEventWindows.map((w) => sql`(occurred_at between GREATEST(${w.startsAt}::timestamptz, ${range.from}::timestamptz) and LEAST(${w.endsAt}::timestamptz, ${range.to}::timestamptz))`)
+        const result = await this.db.execute<{ n: number }>(sql`
+          select count(distinct user_id)::int as n
+          from runtime.events
+          where project_id = ${scope.projectId} and environment = ${scope.environment} and (${sql.join(windowConds, sql` or `)})
+        `)
+        return Number(result.rows[0]?.n ?? 0)
+      })(),
+    ])
+
+    const achievements = achievementRows.map((r) => ({ achievementId: r.achievementId, unlocks: r.unlocks }))
+    const totalUnlocks = achievements.reduce((sum, a) => sum + a.unlocks, 0)
+
+    const offerMap = new Map<string, { offerId: string; impressions: number; clicks: number }>()
+    for (const r of offerRows) {
+      const entry = offerMap.get(r.offerId) ?? { offerId: r.offerId, impressions: 0, clicks: 0 }
+      if (r.kind === 'impression') entry.impressions = r.count
+      else if (r.kind === 'click') entry.clicks = r.count
+      offerMap.set(r.offerId, entry)
+    }
+    const offers = [...offerMap.values()]
+    const totalImpressions = offers.reduce((sum, o) => sum + o.impressions, 0)
+    const totalClicks = offers.reduce((sum, o) => sum + o.clicks, 0)
+
+    return {
+      totals: {
+        events: eventCountRows[0]?.count ?? 0,
+        unlocks: totalUnlocks,
+        impressions: totalImpressions,
+        clicks: totalClicks,
+        timedEventParticipants: totalParticipants,
+      },
+      achievements,
+      offers,
+      timedEvents: timedEventRows,
+    }
   }
 }
 

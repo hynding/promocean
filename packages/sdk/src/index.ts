@@ -1,7 +1,8 @@
 import {
   trackEventResponseSchema, userAchievementsResponseSchema, placementOfferResponseSchema,
-  liveEventsResponseSchema,
+  liveEventsResponseSchema, statsResponseSchema,
   type AchievementStatus, type TrackEventResponse, type UnlockPayload, type OfferCreative, type LiveTimedEvent,
+  type StatsResponse,
 } from '@promocean/contracts'
 
 export interface PromoceanOptions {
@@ -10,6 +11,12 @@ export interface PromoceanOptions {
   userId?: string
   fetchImpl?: typeof fetch
   maxRetries?: number
+  /**
+   * Server-side only. Grants access to secretKey-only endpoints (e.g. getStats).
+   * NEVER ship this to a browser bundle or expose it to client-side code —
+   * it must only be used from a trusted server context.
+   */
+  secretKey?: string
 }
 
 export class PromoceanApiError extends Error {
@@ -40,15 +47,16 @@ export class Promocean {
     return () => this.listeners.delete(cb)
   }
 
-  private async request(path: string, init?: RequestInit): Promise<Response> {
+  private async request(path: string, init?: RequestInit, { useSecretKey = false }: { useSecretKey?: boolean } = {}): Promise<Response> {
     let lastErr: unknown
     let lastStatus: number | undefined
+    const bearer = useSecretKey ? this.opts.secretKey : this.opts.publishableKey
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 250 * 2 ** (attempt - 1)))
       try {
         const res = await this.fetchImpl(`${this.opts.baseUrl}${path}`, {
           ...init,
-          headers: { authorization: `Bearer ${this.opts.publishableKey}`, 'content-type': 'application/json', ...init?.headers },
+          headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json', ...init?.headers },
         })
         if (res.status >= 500) { lastErr = new Error(`server ${res.status}`); lastStatus = res.status; continue }
         if (!res.ok) {
@@ -108,6 +116,29 @@ export class Promocean {
     } catch {
       // fire-and-forget: a failed click must never break the host page
     }
+  }
+
+  async recordImpression(offerId: string): Promise<void> {
+    try {
+      // Generate the impressionId once, outside the retry loop: request() retries
+      // reuse this same request body/init, so every attempt for this one logical
+      // impression carries the same key and the server dedupes them as one.
+      const impressionId = crypto.randomUUID()
+      const body = JSON.stringify({ impressionId, ...(this.userId ? { userId: this.userId } : {}) })
+      await this.request(`/v1/offers/${encodeURIComponent(offerId)}/impression`, { method: 'POST', body })
+    } catch {
+      // fire-and-forget: a failed impression beacon must never break the host page
+    }
+  }
+
+  async getStats(query?: { from?: string; to?: string }): Promise<StatsResponse> {
+    if (!this.opts.secretKey) throw new Error('getStats requires the secretKey option (server-side only).')
+    const params = new URLSearchParams()
+    if (query?.from) params.set('from', query.from)
+    if (query?.to) params.set('to', query.to)
+    const qs = params.size > 0 ? `?${params.toString()}` : ''
+    const res = await this.request(`/v1/stats${qs}`, undefined, { useSecretKey: true })
+    return statsResponseSchema.parse(await res.json())
   }
 
   private dismissalKey(offerId: string) { return `promocean:dismissed:${offerId}` }

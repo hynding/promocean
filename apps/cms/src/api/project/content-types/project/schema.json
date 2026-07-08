@@ -6,6 +6,7 @@
   "attributes": {
     "name": { "type": "string", "required": true },
     "slug": { "type": "uid", "targetField": "name" },
-    "allowedOrigins": { "type": "json" }
+    "allowedOrigins": { "type": "json" },
+    "registeredEventTypes": { "type": "json" }
   }
 }

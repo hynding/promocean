@@ -27,13 +27,6 @@ export function placementsRoute(deps: AppDeps) {
       logger.warn({ err }, 'timed events fetch failed; event-attached offers hidden')
     }
     const offer = resolveOffer(slug, offers, now, active)
-    if (offer) {
-      try {
-        await deps.offerMetricsStore.recordImpression(scope, offer.id, userId, now)
-      } catch (err) {
-        logger.warn({ err }, 'impression recording failed')
-      }
-    }
     return c.json({
       offer: offer
         ? { offerId: offer.id, headline: offer.headline, body: offer.body, imageUrl: offer.imageUrl, ctaText: offer.ctaText, ctaUrl: offer.ctaUrl }

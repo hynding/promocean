@@ -32,6 +32,18 @@ describe('resolveOffer', () => {
   })
 })
 
+describe('resolveOffer tie-break', () => {
+  it('picks the smallest id among equal-priority offers, regardless of input order', () => {
+    const tied: OfferDefinition[] = [
+      { ...base, id: 'zebra', placementSlug: 'homepage-banner', startsAt: null, endsAt: null, priority: 5 },
+      { ...base, id: 'apple', placementSlug: 'homepage-banner', startsAt: null, endsAt: null, priority: 5 },
+      { ...base, id: 'mango', placementSlug: 'homepage-banner', startsAt: null, endsAt: null, priority: 5 },
+    ]
+    expect(resolveOffer('homepage-banner', tied, now)?.id).toBe('apple')
+    expect(resolveOffer('homepage-banner', [...tied].reverse(), now)?.id).toBe('apple')
+  })
+})
+
 describe('resolveOffer with event attachment', () => {
   const attached: OfferDefinition = { ...base, id: 'event-offer', placementSlug: 'homepage-banner', startsAt: null, endsAt: null, priority: 99, timedEventId: 'e1' }
   it('resolves attached offers only while their event is active', () => {

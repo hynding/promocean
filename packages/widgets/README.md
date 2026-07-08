@@ -84,6 +84,16 @@ dismissal (persisted — see SSR note below) and click tracking
 (`client.clickOffer()`) automatically. Renders nothing if there's no active
 offer or the offer has already been dismissed.
 
+**Impression semantics:** fetching the placement offer does **not** by
+itself count as an impression — `<Placement/>` fires exactly one
+`client.recordImpression()` beacon per mount, and only when the offer is
+about to actually render (i.e. it exists and isn't already dismissed). An
+already-dismissed offer never renders and never fires the beacon, including
+across reloads, so impression counts reflect what a user actually saw, not
+every fetch. If you consume `getPlacementOffer()` directly instead of using
+`<Placement/>`, you're responsible for calling `recordImpression()` yourself
+at the point the offer is actually shown.
+
 `imageUrl`/`ctaUrl` are sanitized here: only `http:`/`https:` URLs are
 rendered (anything else, e.g. a malformed or malicious `javascript:` URL, is
 dropped). This sanitization is specific to this component — see the SDK

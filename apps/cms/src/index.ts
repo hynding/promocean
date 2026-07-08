@@ -32,7 +32,7 @@ export default {
     const existing = await strapi.documents('api::project.project').findMany({ limit: 1 })
     if (existing.length > 0) return
     const project = await strapi.documents('api::project.project').create({
-      data: { name: 'Demo', slug: 'demo' },
+      data: { name: 'Demo', slug: 'demo', registeredEventTypes: ['lesson_completed', 'profile_completed'] },
     })
     const rawKey = 'pk_test_demo_1234567890abcdef'
     await strapi.documents('api::api-key.api-key').create({
@@ -40,6 +40,20 @@ export default {
         keyHash: createHash('sha256').update(rawKey).digest('hex'),
         keyPrefix: rawKey.slice(0, 12),
         keyType: 'publishable',
+        environment: 'test',
+        project: project.documentId,
+      },
+    })
+    // Secret key: same mechanism as the publishable key above, but keyType
+    // 'secret' — grants access to secret-only endpoints (GET /v1/stats,
+    // DELETE /v1/users/:userId). Server-side only: the demo's /stats page
+    // reads this via PROMOCEAN_SECRET_KEY (never NEXT_PUBLIC_*).
+    const rawSecretKey = 'sk_test_demo_1234567890abcdef'
+    await strapi.documents('api::api-key.api-key').create({
+      data: {
+        keyHash: createHash('sha256').update(rawSecretKey).digest('hex'),
+        keyPrefix: rawSecretKey.slice(0, 12),
+        keyType: 'secret',
         environment: 'test',
         project: project.documentId,
       },
@@ -82,9 +96,9 @@ export default {
       },
     })
     if (process.env.LOG_PLAINTEXT_KEYS === 'true') {
-      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key ${rawKey}`)
+      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with keys pk=${rawKey} sk=${rawSecretKey}`)
     } else {
-      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key prefix=pk_test_demo_ (set LOG_PLAINTEXT_KEYS=true in dev to reveal)`)
+      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key prefixes pk=pk_test_demo_ sk=sk_test_demo_ (set LOG_PLAINTEXT_KEYS=true in dev to reveal)`)
     }
   },
 }

@@ -20,9 +20,8 @@ export interface TrackedEvent {
   occurredAt: Date
 }
 
-export interface EvaluationResult {
-  progressUpdates: { achievementId: string; current: number; target: number }[]
-  unlocks: { achievementId: string; name: string }[]
+export interface EvaluationPlan {
+  increments: { achievementId: string; name: string; delta: number; target: number }[]
 }
 
 export interface AuthContext {

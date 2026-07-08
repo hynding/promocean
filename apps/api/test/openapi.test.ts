@@ -10,7 +10,7 @@ describe('GET /v1/openapi.json', () => {
     expect(res.status).toBe(200)
   })
 
-  it('describes all six documented endpoints', async () => {
+  it('describes all eight documented endpoints', async () => {
     const res = await app().request('/v1/openapi.json')
     const doc = await res.json()
     expect(doc.openapi).toBe('3.0.3')
@@ -21,7 +21,9 @@ describe('GET /v1/openapi.json', () => {
         '/v1/users/{userId}',
         '/v1/placements/{slug}/offer',
         '/v1/offers/{id}/click',
+        '/v1/offers/{id}/impression',
         '/v1/events/live',
+        '/v1/stats',
       ]),
     )
   })

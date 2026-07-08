@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import type { ApiKeyStore, ConfigStore, ErasureStore, EventStore, OfferMetricsStore, ProgressStore, UsageStore } from '@promocean/core'
+import type { ApiKeyStore, ConfigStore, ErasureStore, IngestionStore, OfferMetricsStore, ProgressStore, StatsStore } from '@promocean/core'
 import { authMiddleware } from './auth.js'
 import { logger } from './logger.js'
 import { buildOpenApiDocument } from './openapi.js'
@@ -12,6 +12,7 @@ import { eventsRoute } from './routes/events.js'
 import { liveEventsRoute } from './routes/live-events.js'
 import { offersRoute } from './routes/offers.js'
 import { placementsRoute } from './routes/placements.js'
+import { statsRoute } from './routes/stats.js'
 import { usersRoute } from './routes/users.js'
 import type { WebhookDispatcher } from './webhooks.js'
 
@@ -47,11 +48,11 @@ declare module 'hono' {
 export interface AppDeps {
   configStore: ConfigStore
   apiKeyStore: ApiKeyStore
-  eventStore: EventStore
+  ingestionStore: IngestionStore
   progressStore: ProgressStore
-  usageStore: UsageStore
   offerMetricsStore: OfferMetricsStore
   erasureStore: ErasureStore
+  statsStore: StatsStore
   webhooks?: WebhookDispatcher
   readiness?: {
     checkDb: () => Promise<void>
@@ -102,6 +103,7 @@ export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
   app.route('/v1/users', usersRoute(deps))
   app.route('/v1/placements', placementsRoute(deps))
   app.route('/v1/offers', offersRoute(deps))
+  app.route('/v1/stats', statsRoute(deps))
   app.onError((err, c) => {
     logger.error({ err, requestId: c.get('requestId') }, 'unhandled error')
     return c.json({ error: { code: 'internal_error', message: 'Internal error.' } }, 500)

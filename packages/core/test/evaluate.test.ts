@@ -9,27 +9,34 @@ const defs: AchievementDefinition[] = [
 const event = { userId: 'u1', type: 'lesson_completed', occurredAt: new Date('2026-07-06T00:00:00Z') }
 
 describe('evaluateEvent', () => {
-  it('increments matching achievements and unlocks at target', () => {
-    const r = evaluateEvent(event, defs, new Map())
-    expect(r.progressUpdates).toEqual([
-      { achievementId: 'a1', current: 1, target: 1 },
-      { achievementId: 'a2', current: 1, target: 10 },
+  it('returns an increment for each matching-type achievement, ignoring non-matching types', () => {
+    const plan = evaluateEvent(event, defs)
+    expect(plan.increments).toEqual([
+      { achievementId: 'a1', name: 'First Lesson', delta: 1, target: 1 },
+      { achievementId: 'a2', name: 'Getting Started', delta: 1, target: 10 },
     ])
-    expect(r.unlocks).toEqual([{ achievementId: 'a1', name: 'First Lesson' }])
   })
   it('ignores non-matching event types', () => {
-    const r = evaluateEvent({ ...event, type: 'signup' }, defs, new Map())
-    expect(r.progressUpdates).toEqual([])
-    expect(r.unlocks).toEqual([])
+    const plan = evaluateEvent({ ...event, type: 'signup' }, defs)
+    expect(plan.increments).toEqual([])
   })
-  it('never advances past target and never re-unlocks', () => {
-    const r = evaluateEvent(event, defs, new Map([['a1', 1], ['a2', 3]]))
-    expect(r.progressUpdates).toEqual([{ achievementId: 'a2', current: 4, target: 10 }])
-    expect(r.unlocks).toEqual([])
+  it('includes an increment even for an achievement that is already at (or past) target — no skip logic', () => {
+    // The store is responsible for clamping at-target increments to no-ops; evaluate never
+    // looks at current progress, so an at-target achievement still produces a delta here.
+    const plan = evaluateEvent(event, defs)
+    const a1 = plan.increments.find((i) => i.achievementId === 'a1')
+    expect(a1).toEqual({ achievementId: 'a1', name: 'First Lesson', delta: 1, target: 1 })
   })
-  it('applies a multiplier and clamps to target', () => {
-    const r = evaluateEvent(event, defs, new Map([['a1', 0], ['a2', 9]]), 2)
-    expect(r.progressUpdates).toContainEqual({ achievementId: 'a2', current: 10, target: 10 })
-    expect(r.unlocks).toContainEqual({ achievementId: 'a2', name: 'Getting Started' })
+  it('honors a multiplier of 1 (default)', () => {
+    const plan = evaluateEvent(event, defs, 1)
+    expect(plan.increments).toContainEqual({ achievementId: 'a2', name: 'Getting Started', delta: 1, target: 10 })
+  })
+  it('honors a multiplier of 2', () => {
+    const plan = evaluateEvent(event, defs, 2)
+    expect(plan.increments).toContainEqual({ achievementId: 'a2', name: 'Getting Started', delta: 2, target: 10 })
+  })
+  it('rounds a fractional multiplier (1.5 -> 2)', () => {
+    const plan = evaluateEvent(event, defs, 1.5)
+    expect(plan.increments).toContainEqual({ achievementId: 'a2', name: 'Getting Started', delta: 2, target: 10 })
   })
 })

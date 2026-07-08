@@ -57,11 +57,21 @@ Open `http://localhost:3002/?user=manual-1` and click **Complete a lesson** —
 you should see a "🏆 Achievement unlocked — First Lesson" toast and the badge
 cabinet showing First Lesson 1/1 unlocked, Getting Started 1/10 in progress.
 
+Then open `http://localhost:3002/stats` — a server-rendered page (reads the
+server-only `PROMOCEAN_SECRET_KEY` from `apps/demo/.env.local`, never exposed
+to the browser) showing live totals and per-achievement/offer/timed-event
+breakdowns for everything you just did.
+
 ### End-to-end tests
 
-The Playwright spec at `apps/demo/e2e/achievement-loop.spec.ts` drives the demo
-app in a real browser and proves the track → unlock → badge-cabinet loop. With
-cms + api already running (per above):
+The Playwright specs in `apps/demo/e2e/` drive the demo app in a real browser:
+`achievement-loop.spec.ts` proves the track → unlock → badge-cabinet loop and
+that the resulting event/unlock counts show up live on `/stats`;
+`offer-loop.spec.ts` proves an offer renders, fires exactly one impression
+beacon, dismisses, and — after a reload — neither re-renders nor fires
+another impression beacon; `timed-event-loop.spec.ts` proves the live-event
+countdown and progress multiplier. With cms + api already running (per
+above):
 
     pnpm --filter demo exec playwright install chromium
     pnpm --filter demo e2e
@@ -81,9 +91,11 @@ middleware so tooling can fetch the spec without a key.
 | POST | `/v1/events` | pk or sk | Track a user event; evaluates achievement progress/unlocks and applies any active timed-event multiplier. |
 | GET | `/v1/users/:userId/achievements` | pk or sk | Fetch a user's full achievement status (locked and unlocked). |
 | DELETE | `/v1/users/:userId` | sk only | Erase a user's stored data (GDPR-style right-to-erasure). Rejected with `403 forbidden` for publishable keys. |
-| GET | `/v1/placements/:slug/offer` | pk or sk | Fetch the active offer creative for a placement slug (or `null`), recording an impression. |
+| GET | `/v1/placements/:slug/offer` | pk or sk | Fetch the active offer creative for a placement slug (or `null`). Does **not** record an impression — see below. |
+| POST | `/v1/offers/:id/impression` | pk or sk | Record an impression beacon for an offer (idempotent per `impressionId`). The `<Placement/>` widget fires this itself, once, only for offers that actually render (a dismissed offer never fires it). |
 | POST | `/v1/offers/:id/click` | pk or sk | Record a click on an offer's CTA. |
 | GET | `/v1/events/live` | pk or sk | List scheduled/live/ending-soon timed events and their multipliers. |
+| GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
 
 Every key is rate-limited independently at `RATE_LIMIT_PER_MINUTE` requests
@@ -93,6 +105,18 @@ exceeded. Publishable keys additionally enforce an `allowedOrigins`
 allowlist when one is configured on the key: requests carrying an `Origin`
 header not on that list are rejected with `403 origin_not_allowed` (secret
 keys, and requests with no `Origin` header, are exempt from this check).
+
+### Registered event types
+
+Enforcement is opt-in per project: set a project's `registeredEventTypes`
+(an array of event type strings) in the CMS to turn it on. Once set,
+`POST /v1/events` rejects any `type` not in that list with `400
+unregistered_event_type` and a `details.suggestion` field (the closest
+registered type, if one is within a small edit distance — useful for
+catching typos like `lesson_completd`). Leave `registeredEventTypes` empty
+or unset and any event type is accepted, no enforcement — this is the
+default for projects that haven't opted in. The seeded demo project
+registers `lesson_completed` and `profile_completed`.
 
 ## Publishing
 

@@ -18,6 +18,7 @@ function fakeClient(achievements: unknown[] = [], offer: unknown = null) {
       getPlacementOffer: vi.fn().mockResolvedValue(offer),
       getLiveEvents: vi.fn().mockResolvedValue([]),
       clickOffer: vi.fn().mockResolvedValue(undefined),
+      recordImpression: vi.fn().mockResolvedValue(undefined),
       dismissOffer: vi.fn(),
       isOfferDismissed: vi.fn().mockReturnValue(false),
     } as any,
@@ -98,6 +99,32 @@ describe('Placement', () => {
     await waitFor(() => expect(screen.getByText('Welcome to Promocean')).toBeDefined())
     expect(screen.queryByRole('link')).toBeNull()
     expect(document.querySelector('img')).toBeNull()
+  })
+  it('fires an impression beacon exactly once when the offer renders', async () => {
+    const { client } = fakeClient()
+    client.getPlacementOffer = vi.fn().mockResolvedValue(offerCreative)
+    render(<PromoceanProvider client={client}><Placement slug="homepage-banner" /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Welcome to Promocean')).toBeDefined())
+    expect(client.recordImpression).toHaveBeenCalledTimes(1)
+    expect(client.recordImpression).toHaveBeenCalledWith('o1')
+  })
+  it('does not fire an impression beacon for a dismissed offer', async () => {
+    const { client } = fakeClient()
+    client.getPlacementOffer = vi.fn().mockResolvedValue(offerCreative)
+    client.isOfferDismissed = vi.fn().mockReturnValue(true)
+    const { container } = render(<PromoceanProvider client={client}><Placement slug="homepage-banner" /></PromoceanProvider>)
+    await waitFor(() => expect(client.getPlacementOffer).toHaveBeenCalled())
+    expect(container.querySelector('[data-promocean-placement]')).toBeNull()
+    expect(client.recordImpression).not.toHaveBeenCalled()
+  })
+  it('does not fire an impression beacon when unmounted before the fetch resolves', async () => {
+    const { client } = fakeClient()
+    let resolveOffer!: (o: unknown) => void
+    client.getPlacementOffer = vi.fn().mockReturnValue(new Promise((resolve) => { resolveOffer = resolve }))
+    const { unmount } = render(<PromoceanProvider client={client}><Placement slug="homepage-banner" /></PromoceanProvider>)
+    unmount()
+    await act(async () => { resolveOffer(offerCreative) })
+    expect(client.recordImpression).not.toHaveBeenCalled()
   })
 })
 

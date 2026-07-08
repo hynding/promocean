@@ -5,7 +5,10 @@ import {
   liveEventsResponseSchema,
   offerClickRequestSchema,
   offerClickResponseSchema,
+  offerImpressionRequestSchema,
+  offerImpressionResponseSchema,
   placementOfferResponseSchema,
+  statsResponseSchema,
   trackEventRequestSchema,
   trackEventResponseSchema,
   userAchievementsResponseSchema,
@@ -37,7 +40,10 @@ export function buildOpenApiDocument(version: string) {
     placementOfferResponse: toSchema(placementOfferResponseSchema),
     offerClickRequest: toSchema(offerClickRequestSchema),
     offerClickResponse: toSchema(offerClickResponseSchema),
+    offerImpressionRequest: toSchema(offerImpressionRequestSchema),
+    offerImpressionResponse: toSchema(offerImpressionResponseSchema),
     liveEventsResponse: toSchema(liveEventsResponseSchema),
+    statsResponse: toSchema(statsResponseSchema),
     errorEnvelope: toSchema(errorEnvelopeSchema),
   }
 
@@ -117,6 +123,23 @@ export function buildOpenApiDocument(version: string) {
         },
       },
     },
+    '/v1/offers/{id}/impression': {
+      post: {
+        summary: 'Record an impression on an offer, deduped by client-supplied impressionId.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/offerImpressionRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'Impression recorded (or already recorded for this impressionId).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/offerImpressionResponse' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
     '/v1/events/live': {
       get: {
         summary: 'List timed events that are scheduled, live, or ending soon.',
@@ -124,6 +147,26 @@ export function buildOpenApiDocument(version: string) {
           '200': {
             description: 'Live and upcoming timed events.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/liveEventsResponse' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/stats': {
+      get: {
+        summary: 'Aggregate project stats: totals, achievements, offers (with CTR), and timed events. Requires a secret key.',
+        parameters: [
+          { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
+          { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Aggregated stats for the requested range.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/statsResponse' } } },
+          },
+          '403': {
+            description: 'A publishable key was used; a secret key is required.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
           },
           default: errorResponse,
         },

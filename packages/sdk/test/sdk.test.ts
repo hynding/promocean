@@ -87,6 +87,80 @@ describe('offers', () => {
   })
 })
 
+describe('recordImpression', () => {
+  it('POSTs a uuid impressionId body to the impression endpoint', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok({ recorded: true }))
+    await client(fetchImpl).recordImpression('o1')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://api.test/v1/offers/o1/impression')
+    const body = JSON.parse(init.body)
+    expect(body.userId).toBe('u1')
+    expect(body.impressionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  })
+  it('swallows errors', async () => {
+    const c = client(vi.fn().mockImplementation(() => Promise.reject(new Error('down'))), { maxRetries: 0 })
+    await expect(c.recordImpression('o1')).resolves.toBeUndefined()
+  })
+  it('retries 5xx then succeeds, reusing the same impressionId across attempts', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(new Response('', { status: 500 })))
+      .mockImplementation(() => ok({ recorded: true }))
+    await client(fetchImpl, { maxRetries: 2 }).recordImpression('o1')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const k1 = JSON.parse(fetchImpl.mock.calls[0][1].body).impressionId
+    const k2 = JSON.parse(fetchImpl.mock.calls[1][1].body).impressionId
+    expect(k1).toBe(k2)
+  })
+  it('swallows errors from crypto.randomUUID (insecure context)', async () => {
+    const fetchImpl = vi.fn()
+    const spy = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => { throw new Error('insecure context') })
+    try {
+      const c = client(fetchImpl)
+      await expect(c.recordImpression('o1')).resolves.toBeUndefined()
+      expect(fetchImpl).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+describe('getStats', () => {
+  const statsOk = {
+    range: { from: null, to: null },
+    totals: { events: 1, unlocks: 2, impressions: 3, clicks: 4, timedEventParticipants: 5 },
+    achievements: [],
+    offers: [],
+    timedEvents: [],
+  }
+  it('throws when no secretKey is configured', async () => {
+    const c = client(vi.fn())
+    await expect(c.getStats()).rejects.toThrow('getStats requires the secretKey option (server-side only).')
+  })
+  it('sends the secretKey as bearer auth and parses the response', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(statsOk))
+    const c = client(fetchImpl, { secretKey: 'sk_test_x' })
+    const stats = await c.getStats()
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://api.test/v1/stats')
+    expect(init.headers.authorization).toBe('Bearer sk_test_x')
+    expect(stats).toEqual(statsOk)
+  })
+  it('encodes from/to into the querystring', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(statsOk))
+    const c = client(fetchImpl, { secretKey: 'sk_test_x' })
+    await c.getStats({ from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z' })
+    const [url] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe(
+      'http://api.test/v1/stats?from=2026-01-01T00%3A00%3A00.000Z&to=2026-02-01T00%3A00%3A00.000Z',
+    )
+  })
+  it('works with an empty publishableKey when secretKey is set', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(statsOk))
+    const c = new Promocean({ publishableKey: '', secretKey: 'sk_test_x', baseUrl: 'http://api.test', fetchImpl })
+    await expect(c.getStats()).resolves.toEqual(statsOk)
+  })
+})
+
 describe('getLiveEvents', () => {
   it('fetches and returns the live events array', async () => {
     const liveEventBody = {

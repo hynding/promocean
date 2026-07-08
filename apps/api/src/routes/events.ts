@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { trackEventRequestSchema, type TrackEventResponse } from '@promocean/contracts'
-import { activeMultiplier, evaluateEvent, type Scope } from '@promocean/core'
+import { activeMultiplier, evaluateEvent, suggestEventType, type Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
 import { logger } from '../logger.js'
 
@@ -16,14 +16,23 @@ export function eventsRoute(deps: AppDeps) {
     const { userId, type, idempotencyKey, meta } = parsed.data
     const occurredAt = parsed.data.occurredAt ? new Date(parsed.data.occurredAt) : new Date()
 
-    const { deduped } = await deps.eventStore.insertEvent(scope, { userId, type, idempotencyKey, occurredAt, meta })
-    if (deduped) {
-      return c.json({ deduped: true, unlocks: [], progress: [] } satisfies TrackEventResponse)
+    // Config-plane failure must not block ingestion: fail open (same pattern as the
+    // multiplier lookup below), just without enforcement for this request.
+    const registered = await deps.configStore.getRegisteredEventTypes(scope.projectId).catch((err) => {
+      logger.warn({ err }, 'registered event types fetch failed; skipping unregistered-event-type enforcement')
+      return [] as string[]
+    })
+    if (registered.length > 0 && !registered.includes(type)) {
+      return c.json({
+        error: {
+          code: 'unregistered_event_type',
+          message: `Unknown event type "${type}".`,
+          details: { suggestion: suggestEventType(type, registered) },
+        },
+      }, 400)
     }
 
     const definitions = await deps.configStore.getAchievements(scope.projectId)
-    const relevant = definitions.filter((d) => d.eventType === type)
-    const counts = await deps.progressStore.getCounts(scope, userId, relevant.map((d) => d.id))
 
     let multiplier = 1
     try {
@@ -32,30 +41,37 @@ export function eventsRoute(deps: AppDeps) {
       logger.warn({ err }, 'timed events fetch failed; defaulting multiplier to 1')
     }
 
-    const result = evaluateEvent({ userId, type, occurredAt }, definitions, counts, multiplier)
+    const plan = evaluateEvent({ userId, type, occurredAt }, definitions, multiplier)
+    const month = new Date().toISOString().slice(0, 7)
 
-    const unlockedAt = new Date()
-    const unlocks: TrackEventResponse['unlocks'] = []
-    for (const u of result.progressUpdates) {
-      await deps.progressStore.setProgress(scope, userId, u.achievementId, u.current)
+    const outcome = await deps.ingestionStore.ingestEvent(
+      scope,
+      { userId, type, idempotencyKey, occurredAt, meta },
+      plan.increments.map(({ achievementId, delta, target }) => ({ achievementId, delta, target })),
+      month,
+    )
+    if (outcome.deduped) {
+      return c.json({ deduped: true, unlocks: [], progress: [] } satisfies TrackEventResponse)
     }
-    for (const u of result.unlocks) {
-      const isNew = await deps.progressStore.recordUnlock(scope, userId, u.achievementId, unlockedAt)
-      if (isNew) unlocks.push({ achievementId: u.achievementId, name: u.name, unlockedAt: unlockedAt.toISOString() })
-    }
-    await deps.usageStore.recordUsage(scope, userId, new Date().toISOString().slice(0, 7))
+
+    const nameById = new Map(plan.increments.map((i) => [i.achievementId, i.name]))
+    const unlocks: TrackEventResponse['unlocks'] = outcome.newUnlocks.map((u) => ({
+      achievementId: u.achievementId,
+      name: nameById.get(u.achievementId)!,
+      unlockedAt: u.unlockedAt.toISOString(),
+    }))
 
     if (unlocks.length > 0 && deps.webhooks) {
       void deps.webhooks
         .deliver(scope.projectId, {
           type: 'achievement.unlocked',
           data: { userId, environment: scope.environment, unlocks },
-          createdAt: unlockedAt.toISOString(),
+          createdAt: unlocks[0]!.unlockedAt,
         })
         .catch(() => {})
     }
 
-    return c.json({ deduped: false, unlocks, progress: result.progressUpdates } satisfies TrackEventResponse)
+    return c.json({ deduped: false, unlocks, progress: outcome.progress } satisfies TrackEventResponse)
   })
   return app
 }
