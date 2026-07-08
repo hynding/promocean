@@ -54,14 +54,21 @@ export function createRateLimiter(limitPerMinute: number, opts: RateLimiterOptio
     const effectiveKey = isNewKey && buckets.size >= maxBuckets ? OVERFLOW_KEY : hashedKey
 
     let bucket = buckets.get(effectiveKey)
-    if (!bucket || nowMs - bucket.windowStart >= WINDOW_MS) {
+    if (!bucket) {
+      // New key: create its bucket. No sweep — new-key creation alone does not trigger
+      // the lazy sweep (which only fires on true rollover of a pre-existing bucket).
+      bucket = { count: 0, windowStart: nowMs }
+      buckets.set(effectiveKey, bucket)
+    } else if (nowMs - bucket.windowStart >= WINDOW_MS) {
+      // Existing bucket has rolled over: reset it and sweep.
       bucket = { count: 0, windowStart: nowMs }
       buckets.set(effectiveKey, bucket)
 
-      // Lazy sweep, piggybacked on this request's own bucket rollover: reclaim every
+      // Lazy sweep, piggybacked on this key's own bucket rollover: reclaim every
       // expired bucket in the map. O(n) over the map per sweep, but a sweep only runs
-      // when *this* key's own bucket rolls over — at most once per window per active
-      // key — so the amortized cost stays cheap even at the 10k-bucket cap.
+      // on a true rollover of a pre-existing bucket — at most once per window per active
+      // key — so the amortized cost stays cheap even at the 10k-bucket cap. New-key
+      // floods never trigger it; memory stays bounded by the cap independently.
       for (const [k, b] of buckets) {
         if (k !== effectiveKey && nowMs - b.windowStart >= WINDOW_MS) buckets.delete(k)
       }
