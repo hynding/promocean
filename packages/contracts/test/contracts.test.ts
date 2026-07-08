@@ -8,6 +8,7 @@ import {
   offerImpressionRequestSchema,
   offerImpressionResponseSchema,
   statsResponseSchema,
+  webhookMessageSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -142,5 +143,36 @@ describe('error codes', () => {
       error: { code: 'unregistered_event_type', message: 'Event type not registered' },
     })
     expect(result.success).toBe(true)
+  })
+  it('accepts not_found error code', () => {
+    const result = errorEnvelopeSchema.safeParse({
+      error: { code: 'not_found', message: 'Resource not found' },
+    })
+    expect(result.success).toBe(true)
+  })
+})
+
+describe('webhookMessageSchema', () => {
+  it('accepts a message with messageId', () => {
+    const payload = {
+      messageId: '550e8400-e29b-41d4-a716-446655440000',
+      type: 'timed_event.live',
+      data: { eventId: 'e1' },
+      createdAt: '2026-07-08T10:00:00.000Z',
+    }
+    const result = webhookMessageSchema.safeParse(payload)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toEqual(payload)
+    }
+  })
+  it('rejects a message without messageId', () => {
+    const payload = {
+      type: 'timed_event.live',
+      data: { eventId: 'e1' },
+      createdAt: '2026-07-08T10:00:00.000Z',
+    }
+    const result = webhookMessageSchema.safeParse(payload)
+    expect(result.success).toBe(false)
   })
 })

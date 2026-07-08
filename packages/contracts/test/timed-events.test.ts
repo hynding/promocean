@@ -16,7 +16,7 @@ describe('timed event schemas', () => {
       expect(liveEventsResponseSchema.safeParse({ events: [{ ...event, state }] }).success).toBe(false)
   })
   it('validates webhook messages and exports the signature header', () => {
-    expect(webhookMessageSchema.parse({ type: 'achievement.unlocked', data: { userId: 'u1' }, createdAt: event.startsAt }).type).toBe('achievement.unlocked')
+    expect(webhookMessageSchema.parse({ messageId: '550e8400-e29b-41d4-a716-446655440000', type: 'achievement.unlocked', data: { userId: 'u1' }, createdAt: event.startsAt }).type).toBe('achievement.unlocked')
     expect(webhookMessageSchema.safeParse({ type: 'other', data: {}, createdAt: event.startsAt }).success).toBe(false)
     expect(WEBHOOK_SIGNATURE_HEADER).toBe('x-promocean-signature')
   })

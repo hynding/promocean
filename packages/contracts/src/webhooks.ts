@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 export const webhookMessageSchema = z.object({
+  messageId: z.string().uuid(),
   type: z.enum(['timed_event.live', 'timed_event.ending_soon', 'timed_event.ended', 'achievement.unlocked']),
   data: z.record(z.string(), z.unknown()),
   createdAt: z.iso.datetime(),
