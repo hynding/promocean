@@ -32,7 +32,7 @@ export default {
     const existing = await strapi.documents('api::project.project').findMany({ limit: 1 })
     if (existing.length > 0) return
     const project = await strapi.documents('api::project.project').create({
-      data: { name: 'Demo', slug: 'demo' },
+      data: { name: 'Demo', slug: 'demo', registeredEventTypes: ['lesson_completed', 'profile_completed'] },
     })
     const rawKey = 'pk_test_demo_1234567890abcdef'
     await strapi.documents('api::api-key.api-key').create({

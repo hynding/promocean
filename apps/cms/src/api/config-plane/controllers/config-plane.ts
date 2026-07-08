@@ -1,5 +1,8 @@
 import { timingSafeEqual } from 'node:crypto'
 
+// mirrors packages/contracts/src/events.ts EVENT_TYPE_PATTERN — cms doesn't import contracts
+const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/
+
 function configSecretOk(ctx: any): boolean {
   const expected = process.env.CONFIG_PLANE_SECRET
   if (!expected) return false // fail closed when unset
@@ -109,6 +112,24 @@ export default {
         enabled: r.enabled,
       })),
     }
+  },
+  async eventTypes(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const projectId = String(ctx.params.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
+    const project = await strapi.documents('api::project.project').findOne({ documentId: projectId })
+    if (!project) return ctx.notFound()
+    const raw = project.registeredEventTypes
+    let eventTypes: string[]
+    if (Array.isArray(raw)) {
+      eventTypes = raw.filter((t: unknown): t is string => typeof t === 'string' && EVENT_TYPE_PATTERN.test(t))
+    } else if (raw == null) {
+      eventTypes = []
+    } else {
+      strapi.log.warn(`[promocean] project ${project.documentId} registeredEventTypes is not an array; ignoring`)
+      eventTypes = []
+    }
+    ctx.body = { eventTypes }
   },
   async verifyKey(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()
