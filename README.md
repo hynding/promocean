@@ -118,6 +118,46 @@ or unset and any event type is accepted, no enforcement — this is the
 default for projects that haven't opted in. The seeded demo project
 registers `lesson_completed` and `profile_completed`.
 
+## Webhooks
+
+The api dispatches signed `POST` webhooks for `timed_event.live` /
+`timed_event.ending_soon` / `timed_event.ended` (fired by a 30s lifecycle
+scheduler as events cross those thresholds) and `achievement.unlocked`
+(fired inline from `POST /v1/events` when a track call unlocks an
+achievement). Every message carries a `messageId` (a uuid) — **consumers
+must dedup by `messageId`, not by event/transition**: a redelivery of a
+timed-event transition is sent as a brand-new message with a fresh
+`messageId`, not a retry of the original one. Also verify the
+`x-promocean-signature` HMAC header and check the signed `createdAt`
+against a replay window (e.g. reject anything older than a few minutes) —
+both belong in your consumer regardless of transport.
+
+Timed-event delivery is claim-then-mark: the scheduler claims a transition
+once, delivers it to every enabled endpoint (each endpoint independently
+retries transient failures and is dead-lettered on permanent failure), then
+marks the claim delivered. If the process crashes between delivering and
+marking, the claim is left stale and a later tick's **redelivery sweep**
+re-drives it (incrementing an attempt counter, capped at 5 attempts) with a
+freshly built message and a new `messageId`, as above. A **retention
+sweep** on the same tick purges dead letters older than
+`WEBHOOK_DEAD_LETTER_TTL_DAYS` (default 30). A disabled event that was
+never observed live emits no `ended` message — disabling before an event
+ever went live means no lifecycle transition ever fired for it.
+
+The dispatcher `POST`s directly to whatever URL a project configures as a
+webhook endpoint. There is currently no SSRF protection (e.g. blocking
+private/internal IP ranges) — treat endpoint URLs as trusted input for now.
+Blocking requests to private IP ranges is required before this becomes a
+multi-tenant, self-service feature and is tracked as future work.
+
+Scheduler tuning (all optional, read once at process start):
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `WEBHOOK_REDELIVERY_GRACE_MINUTES` | `5` | How long a claimed-but-undelivered transition sits before the redelivery sweep re-drives it. |
+| `TIMED_EVENT_SCAN_GRACE_MINUTES` | `60` | How far back the config-plane scan window looks for timed events. Must exceed the redelivery grace (a shorter scan window would let events drop out of the feed before a stale claim could ever be redriven) — if misconfigured, the scheduler logs a warning at startup and clamps it to `WEBHOOK_REDELIVERY_GRACE_MINUTES + 5`. |
+| `WEBHOOK_DEAD_LETTER_TTL_DAYS` | `30` | Dead letters older than this are purged by the retention sweep. |
+
 ## Publishing
 
 MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) publish via a two-step manual flow:

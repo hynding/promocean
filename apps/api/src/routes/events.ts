@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { trackEventRequestSchema, type TrackEventResponse } from '@promocean/contracts'
 import { activeMultiplier, evaluateEvent, suggestEventType, type Scope } from '@promocean/core'
@@ -64,6 +65,7 @@ export function eventsRoute(deps: AppDeps) {
     if (unlocks.length > 0 && deps.webhooks) {
       void deps.webhooks
         .deliver(scope.projectId, {
+          messageId: randomUUID(),
           type: 'achievement.unlocked',
           data: { userId, environment: scope.environment, unlocks },
           createdAt: unlocks[0]!.unlockedAt,

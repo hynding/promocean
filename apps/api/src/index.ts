@@ -13,7 +13,14 @@ const plane = new StrapiConfigPlane({
 })
 const webhookDeliveryStore = new PgWebhookDeliveryStore(db)
 const webhooks = new WebhookDispatcher({ configStore: plane, deliveryStore: webhookDeliveryStore })
-startLifecycleScheduler({ configStore: plane, deliveryStore: webhookDeliveryStore, dispatcher: webhooks })
+startLifecycleScheduler({
+  configStore: plane,
+  deliveryStore: webhookDeliveryStore,
+  dispatcher: webhooks,
+  redeliveryGraceMinutes: Number(process.env.WEBHOOK_REDELIVERY_GRACE_MINUTES ?? 5),
+  scanGraceMinutes: Number(process.env.TIMED_EVENT_SCAN_GRACE_MINUTES ?? 60),
+  deadLetterTtlDays: Number(process.env.WEBHOOK_DEAD_LETTER_TTL_DAYS ?? 30),
+})
 const app = createApp({
   configStore: plane,
   apiKeyStore: plane,
