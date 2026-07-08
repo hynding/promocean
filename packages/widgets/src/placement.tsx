@@ -20,7 +20,11 @@ export function Placement({ slug }: { slug: string }) {
   useEffect(() => {
     let cancelled = false
     client.getPlacementOffer(slug)
-      .then((o) => { if (!cancelled) setOffer(o) })
+      .then((o) => {
+        if (cancelled) return
+        setOffer(o)
+        if (o && !client.isOfferDismissed(o.offerId)) void client.recordImpression(o.offerId)
+      })
       .catch(() => {}) // fail silent-to-empty
     return () => { cancelled = true }
   }, [client, slug])
