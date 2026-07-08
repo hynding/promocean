@@ -1,20 +1,20 @@
-import type { AchievementDefinition, EvaluationResult, TrackedEvent } from './types.js'
+import type { AchievementDefinition, EvaluationPlan, TrackedEvent } from './types.js'
 
-export function evaluateEvent(
-  event: TrackedEvent,
-  definitions: AchievementDefinition[],
-  currentCounts: Map<string, number>,
-  multiplier = 1,
-): EvaluationResult {
-  const progressUpdates: EvaluationResult['progressUpdates'] = []
-  const unlocks: EvaluationResult['unlocks'] = []
+/**
+ * Computes the set of progress deltas a tracked event should apply, without deciding
+ * outcomes (unlocks, clamped progress). Those decisions belong to the store, which applies
+ * the deltas atomically and returns the resulting truth (see IngestionStore.ingestEvent).
+ *
+ * For every achievement definition whose eventType matches the event, an increment is
+ * produced — including achievements already at or past target. This is intentional: the
+ * caller no longer has (or needs) current-progress state, and an at-target increment is a
+ * no-op once the store clamps it, avoiding a read-modify-write race.
+ */
+export function evaluateEvent(event: TrackedEvent, definitions: AchievementDefinition[], multiplier = 1): EvaluationPlan {
+  const increments: EvaluationPlan['increments'] = []
   for (const def of definitions) {
     if (def.eventType !== event.type) continue
-    const prev = currentCounts.get(def.id) ?? 0
-    if (prev >= def.targetCount) continue
-    const current = Math.min(prev + 1 * multiplier, def.targetCount)
-    progressUpdates.push({ achievementId: def.id, current, target: def.targetCount })
-    if (current >= def.targetCount) unlocks.push({ achievementId: def.id, name: def.name })
+    increments.push({ achievementId: def.id, name: def.name, delta: Math.round(1 * multiplier), target: def.targetCount })
   }
-  return { progressUpdates, unlocks }
+  return { increments }
 }
