@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import type { ApiKeyStore, ConfigStore, ErasureStore, EventStore, OfferMetricsStore, ProgressStore, UsageStore } from '@promocean/core'
+import type { ApiKeyStore, ConfigStore, ErasureStore, IngestionStore, OfferMetricsStore, ProgressStore } from '@promocean/core'
 import { authMiddleware } from './auth.js'
 import { logger } from './logger.js'
 import { buildOpenApiDocument } from './openapi.js'
@@ -47,9 +47,8 @@ declare module 'hono' {
 export interface AppDeps {
   configStore: ConfigStore
   apiKeyStore: ApiKeyStore
-  eventStore: EventStore
+  ingestionStore: IngestionStore
   progressStore: ProgressStore
-  usageStore: UsageStore
   offerMetricsStore: OfferMetricsStore
   erasureStore: ErasureStore
   webhooks?: WebhookDispatcher

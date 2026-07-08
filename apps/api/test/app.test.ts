@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { WebhookDispatcher } from '../src/webhooks.js'
 import { createApp } from '../src/app.js'
 import { makeFakes } from './fakes.js'
 
@@ -38,6 +39,91 @@ describe('POST /v1/events', () => {
     const json = await res.json()
     expect(json.deduped).toBe(true)
     expect(json.unlocks).toEqual([])
+  })
+  it('rejects an unregistered event type with a close-match suggestion', async () => {
+    const app = createApp(makeFakes(defs, auth, [], [], ['lesson_completed']))
+    const res = await app.request('/v1/events', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ userId: 'u1', type: 'lesson_complete', idempotencyKey: 'k1234567' }),
+    })
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toEqual({
+      code: 'unregistered_event_type',
+      message: 'Unknown event type "lesson_complete".',
+      details: { suggestion: 'lesson_completed' },
+    })
+  })
+  it('rejects an unregistered event type with a null suggestion when nothing is close', async () => {
+    const app = createApp(makeFakes(defs, auth, [], [], ['lesson_completed']))
+    const res = await app.request('/v1/events', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ userId: 'u1', type: 'totally_different_x', idempotencyKey: 'k1234567' }),
+    })
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error.code).toBe('unregistered_event_type')
+    expect(json.error.details).toEqual({ suggestion: null })
+  })
+  it('does not enforce registered event types when the list is empty', async () => {
+    const app = createApp(makeFakes(defs, auth, [], [], []))
+    const res = await app.request('/v1/events', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ userId: 'u1', type: 'totally_unregistered_type', idempotencyKey: 'k1234567' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json()).deduped).toBe(false)
+  })
+  it('still ingests when the registered-event-types fetch fails (fails open)', async () => {
+    const fakes = makeFakes(defs, auth, [], [], ['lesson_completed'])
+    fakes.configStore.getRegisteredEventTypes = async () => { throw new Error('config plane down') }
+    const res = await createApp(fakes).request('/v1/events', { method: 'POST', headers, body: body('k1234567') })
+    expect(res.status).toBe(200)
+    expect((await res.json()).deduped).toBe(false)
+  })
+})
+
+describe('POST /v1/events webhook dispatch', () => {
+  function fakeWebhooks() {
+    return { deliver: vi.fn(async () => {}) } as unknown as { deliver: ReturnType<typeof vi.fn> } & WebhookDispatcher
+  }
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('dispatches an achievement.unlocked webhook when the event produces a new unlock', async () => {
+    const webhooks = fakeWebhooks()
+    const app = createApp({ ...makeFakes(defs, auth), webhooks })
+    const res = await app.request('/v1/events', { method: 'POST', headers, body: body('wk1_00001') })
+    expect(res.status).toBe(200)
+    await flush()
+    expect(webhooks.deliver).toHaveBeenCalledTimes(1)
+    expect(webhooks.deliver.mock.calls[0][0]).toBe('p1')
+    expect(webhooks.deliver.mock.calls[0][1]).toMatchObject({
+      type: 'achievement.unlocked',
+      data: { userId: 'u1', environment: 'test' },
+    })
+  })
+  it('does not dispatch a webhook when the event produces no new unlock', async () => {
+    const webhooks = fakeWebhooks()
+    const noUnlockDefs = [{ id: 'a2', name: 'Getting Started', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 10 }]
+    const app = createApp({ ...makeFakes(noUnlockDefs, auth), webhooks })
+    const res = await app.request('/v1/events', { method: 'POST', headers, body: body('wk2_00001') })
+    expect(res.status).toBe(200)
+    await flush()
+    expect(webhooks.deliver).not.toHaveBeenCalled()
+  })
+  it('does not dispatch a webhook on a deduped replay', async () => {
+    const webhooks = fakeWebhooks()
+    const app = createApp({ ...makeFakes(defs, auth), webhooks })
+    await app.request('/v1/events', { method: 'POST', headers, body: body('wk3_00001') })
+    await flush()
+    webhooks.deliver.mockClear()
+    const res = await app.request('/v1/events', { method: 'POST', headers, body: body('wk3_00001') })
+    expect((await res.json()).deduped).toBe(true)
+    await flush()
+    expect(webhooks.deliver).not.toHaveBeenCalled()
   })
 })
 

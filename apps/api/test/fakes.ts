@@ -1,6 +1,6 @@
 import type {
-  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, ErasureStore, EventStore, OfferDefinition,
-  OfferMetricsStore, ProgressStore, Scope, TimedEventDefinition, UsageStore,
+  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, ErasureStore, IngestionStore, OfferDefinition,
+  OfferMetricsStore, ProgressStore, Scope, TimedEventDefinition,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
@@ -10,6 +10,7 @@ export function makeFakes(
   auth: AuthContext | null,
   offers: OfferDefinition[] = [],
   timedEvents: TimedEventDefinition[] = [],
+  registeredEventTypes: string[] = [],
 ) {
   const seenIdem = new Set<string>()
   const progress = new Map<string, number>()
@@ -21,16 +22,9 @@ export function makeFakes(
     getTimedEvents: async () => timedEvents,
     getAllTimedEvents: async () => [],
     getWebhookEndpoints: async () => [],
+    getRegisteredEventTypes: async () => registeredEventTypes,
   }
   const apiKeyStore: ApiKeyStore = { verifyKey: async (raw) => (raw === 'pk_test_valid_key_1' ? auth : null) }
-  const eventStore: EventStore = {
-    insertEvent: async (s, e) => {
-      const k = sk(s, e.idempotencyKey)
-      if (seenIdem.has(k)) return { deduped: true }
-      seenIdem.add(k)
-      return { deduped: false }
-    },
-  }
   const progressStore: ProgressStore = {
     getCounts: async (s, u, ids) =>
       new Map(ids.flatMap((id) => (progress.has(sk(s, `${u}:${id}`)) ? [[id, progress.get(sk(s, `${u}:${id}`))!] as const] : []))),
@@ -49,7 +43,39 @@ export function makeFakes(
           return { achievementId, current, unlockedAt: unlockDates.get(sk(s, `${u}:${achievementId}`)) ?? null }
         }),
   }
-  const usageStore: UsageStore = { recordUsage: async (_s, u, m) => { usage.push(`${u}:${m}`) } }
+  // Mirrors PgIngestionStore's transactional semantics in-memory: dedup by idempotencyKey,
+  // increments clamped at target, unlocks recorded exactly once. Shares the `progress` /
+  // `unlockDates` maps with progressStore above so GET /users/:userId/achievements (still
+  // reading through progressStore) reflects state written via ingestEvent, same as the real
+  // stores share the same underlying tables.
+  const ingestionStore: IngestionStore = {
+    ingestEvent: async (scope, event, increments, month) => {
+      const idemKey = sk(scope, event.idempotencyKey)
+      if (seenIdem.has(idemKey)) return { deduped: true }
+      seenIdem.add(idemKey)
+
+      const resultProgress: { achievementId: string; current: number; target: number }[] = []
+      for (const inc of increments) {
+        const key = sk(scope, `${event.userId}:${inc.achievementId}`)
+        const next = Math.min((progress.get(key) ?? 0) + inc.delta, inc.target)
+        progress.set(key, next)
+        resultProgress.push({ achievementId: inc.achievementId, current: next, target: inc.target })
+      }
+
+      const unlockedAt = new Date()
+      const newUnlocks: { achievementId: string; unlockedAt: Date }[] = []
+      for (const p of resultProgress) {
+        if (p.current < p.target) continue
+        const key = sk(scope, `${event.userId}:${p.achievementId}`)
+        if (unlockDates.has(key)) continue
+        unlockDates.set(key, unlockedAt)
+        newUnlocks.push({ achievementId: p.achievementId, unlockedAt })
+      }
+
+      usage.push(`${event.userId}:${month}`)
+      return { deduped: false, progress: resultProgress, newUnlocks }
+    },
+  }
   const metrics: { impressions: Array<{ offerId: string; userId: string | null }>; clicks: Array<{ offerId: string; userId: string | null }> } = { impressions: [], clicks: [] }
   const offerMetricsStore: OfferMetricsStore = {
     recordImpression: async (_s, offerId, userId) => { metrics.impressions.push({ offerId, userId }) },
@@ -63,5 +89,5 @@ export function makeFakes(
       return erasureCounts
     },
   }
-  return { configStore, apiKeyStore, eventStore, progressStore, usageStore, usage, offerMetricsStore, metrics, erasureStore, erasedUsers, erasureCounts }
+  return { configStore, apiKeyStore, progressStore, ingestionStore, usage, offerMetricsStore, metrics, erasureStore, erasedUsers, erasureCounts }
 }

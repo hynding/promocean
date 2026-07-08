@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server'
-import { createDb, runMigrations, PgErasureStore, PgEventStore, PgOfferMetricsStore, PgProgressStore, PgUsageStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
+import { createDb, runMigrations, PgErasureStore, PgIngestionStore, PgOfferMetricsStore, PgProgressStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
 import { StrapiConfigPlane } from '@promocean/adapter-strapi'
 import { createApp } from './app.js'
 import { logger } from './logger.js'
@@ -17,9 +17,8 @@ startLifecycleScheduler({ configStore: plane, deliveryStore: webhookDeliveryStor
 const app = createApp({
   configStore: plane,
   apiKeyStore: plane,
-  eventStore: new PgEventStore(db),
+  ingestionStore: new PgIngestionStore(db),
   progressStore: new PgProgressStore(db),
-  usageStore: new PgUsageStore(db),
   offerMetricsStore: new PgOfferMetricsStore(db),
   erasureStore: new PgErasureStore(db),
   webhooks,
