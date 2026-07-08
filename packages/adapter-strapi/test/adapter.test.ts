@@ -38,6 +38,19 @@ describe('StrapiConfigPlane.getAchievements', () => {
     const plane = makePlane(vi.fn().mockImplementation(() => Promise.reject(new Error('down'))))
     await expect(plane.getAchievements('p1')).rejects.toThrow()
   })
+  it('throws on a malformed body (schema mismatch) with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => ok({ achievements: [{ id: 'a1' }] })))
+    await expect(plane.getAchievements('p1')).rejects.toThrow()
+  })
+  it('serves stale cache when a later response fails validation', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(achievementsBody))
+      .mockImplementation(() => ok({ achievements: 'not-an-array' }))
+    const plane = makePlane(fetchImpl, 0) // TTL 0: always expired
+    await plane.getAchievements('p1')
+    const defs = await plane.getAchievements('p1')
+    expect(defs).toEqual(achievementsBody.achievements)
+  })
 })
 
 describe('StrapiConfigPlane.verifyKey', () => {
@@ -63,6 +76,39 @@ describe('StrapiConfigPlane.verifyKey', () => {
     const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, allowedOrigins: ['ok', 42, null] }))
     const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
     expect(auth?.allowedOrigins).toBeNull()
+  })
+  it('returns null (not a corrupt AuthContext) on a bad keyType enum', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, keyType: 'bogus' }))
+    const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
+    expect(auth).toBeNull()
+  })
+  it('returns null (not a corrupt AuthContext) on a bad environment enum', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, environment: 'staging' }))
+    const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
+    expect(auth).toBeNull()
+  })
+  it('caches a resolved key within TTL', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(authBody))
+    const plane = makePlane(fetchImpl)
+    await plane.verifyKey('pk_test_demo_1234567890abcdef')
+    await plane.verifyKey('pk_test_demo_1234567890abcdef')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+  it('serves the stale cached auth context when strapi errors after expiry', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(authBody))
+      .mockImplementation(() => Promise.reject(new Error('down')))
+    const plane = makePlane(fetchImpl, 0) // TTL 0: always expired
+    await plane.verifyKey('pk_test_demo_1234567890abcdef')
+    const auth = await plane.verifyKey('pk_test_demo_1234567890abcdef')
+    expect(auth).toEqual(authBody)
+  })
+  it('does not cache a non-404 error response', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('', { status: 500 })))
+    const plane = makePlane(fetchImpl)
+    await expect(plane.verifyKey('pk_test_demo_1234567890abcdef')).rejects.toThrow()
+    await expect(plane.verifyKey('pk_test_demo_1234567890abcdef')).rejects.toThrow()
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -90,11 +136,15 @@ describe('StrapiConfigPlane.getOffers', () => {
     await plane.getOffers('p1')
     expect((await plane.getOffers('p1'))[0].id).toBe('o1')
   })
+  it('throws on a malformed body with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => ok({ offers: [{ id: 'o1' }] })))
+    await expect(plane.getOffers('p1')).rejects.toThrow()
+  })
 })
 
 const timedEventsBody = {
   events: [{
-    id: 1, name: 'Summer Sale', description: null,
+    id: '1', name: 'Summer Sale', description: null,
     startsAt: '2026-07-01T00:00:00.000Z', endsAt: '2026-07-10T00:00:00.000Z',
     endingSoonMinutes: 60, multiplier: 2, enabled: true,
   }],
@@ -121,11 +171,15 @@ describe('StrapiConfigPlane.getTimedEvents', () => {
     const events = await plane.getTimedEvents('p1')
     expect(events[0].id).toBe('1')
   })
+  it('throws on a malformed body with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => ok({ events: [{ id: '1' }] })))
+    await expect(plane.getTimedEvents('p1')).rejects.toThrow()
+  })
 })
 
 const allTimedEventsBody = {
   events: [{
-    id: 2, projectId: 'p1', name: 'Autumn Sale', description: 'desc',
+    id: '2', projectId: 'p1', name: 'Autumn Sale', description: 'desc',
     startsAt: '2026-09-01T00:00:00.000Z', endsAt: '2026-09-10T00:00:00.000Z',
     endingSoonMinutes: 1440, multiplier: 1, enabled: false,
   }],
@@ -138,10 +192,14 @@ describe('StrapiConfigPlane.getAllTimedEvents', () => {
     expect(String(fetchImpl.mock.calls[0][0])).toBe('http://cms.test/api/config-plane/timed-events/all')
     expect(events[0]).toMatchObject({ id: '2', projectId: 'p1', name: 'Autumn Sale', enabled: false })
   })
+  it('throws on a malformed body with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => ok({ events: [{ id: '2' }] })))
+    await expect(plane.getAllTimedEvents()).rejects.toThrow()
+  })
 })
 
 const webhookEndpointsBody = {
-  endpoints: [{ id: 5, url: 'https://hooks.example.com/x', secret: 'whsec_abc', enabled: true }],
+  endpoints: [{ id: '5', url: 'https://hooks.example.com/x', secret: 'whsec_abc', enabled: true }],
 }
 
 describe('StrapiConfigPlane.getWebhookEndpoints', () => {
@@ -150,5 +208,42 @@ describe('StrapiConfigPlane.getWebhookEndpoints', () => {
     const endpoints = await makePlane(fetchImpl).getWebhookEndpoints('p1')
     expect(String(fetchImpl.mock.calls[0][0])).toBe('http://cms.test/api/config-plane/webhook-endpoints?projectId=p1')
     expect(endpoints[0]).toEqual({ id: '5', url: 'https://hooks.example.com/x', secret: 'whsec_abc', enabled: true })
+  })
+  it('throws on a malformed body with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => ok({ endpoints: [{ id: '5' }] })))
+    await expect(plane.getWebhookEndpoints('p1')).rejects.toThrow()
+  })
+})
+
+const eventTypesBody = { eventTypes: ['lesson_completed', 'quiz_passed'] }
+
+describe('StrapiConfigPlane.getRegisteredEventTypes', () => {
+  it('fetches the correct URL with the secret header and returns the event types', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(eventTypesBody))
+    const eventTypes = await makePlane(fetchImpl).getRegisteredEventTypes('p1')
+    expect(eventTypes).toEqual(['lesson_completed', 'quiz_passed'])
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://cms.test/api/config-plane/projects/p1/event-types')
+    expect(init.headers['x-config-secret']).toBe('s3cret')
+  })
+  it('caches within TTL (one fetch for two calls)', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(eventTypesBody))
+    const plane = makePlane(fetchImpl)
+    await plane.getRegisteredEventTypes('p1')
+    await plane.getRegisteredEventTypes('p1')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+  it('serves stale cache when strapi errors after expiry', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(eventTypesBody))
+      .mockImplementation(() => Promise.reject(new Error('down')))
+    const plane = makePlane(fetchImpl, 0)
+    await plane.getRegisteredEventTypes('p1')
+    const eventTypes = await plane.getRegisteredEventTypes('p1')
+    expect(eventTypes).toEqual(['lesson_completed', 'quiz_passed'])
+  })
+  it('throws on a malformed body with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => ok({ eventTypes: 'not-an-array' })))
+    await expect(plane.getRegisteredEventTypes('p1')).rejects.toThrow()
   })
 })
