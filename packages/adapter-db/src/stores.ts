@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt, lte, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
 import type { ErasureStore, EventStore, IngestionStore, OfferMetricsStore, ProgressStore, Scope, StatsStore, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
 import { achievementProgress, events, monthlyActiveUsers, offerEvents, timedEventNotifications, unlocks, usageCounters, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
@@ -241,6 +241,7 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
         eq(timedEventNotifications.projectId, projectId),
         eq(timedEventNotifications.eventId, eventId),
         eq(timedEventNotifications.transition, transition),
+        isNull(timedEventNotifications.deliveredAt),
       ))
   }
   async findStaleClaims(olderThan: Date, maxAttempts: number) {
@@ -251,7 +252,7 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
       attempts: timedEventNotifications.attempts,
     }).from(timedEventNotifications)
       .where(and(
-        sql`${timedEventNotifications.deliveredAt} is null`,
+        isNull(timedEventNotifications.deliveredAt),
         lt(timedEventNotifications.firedAt, olderThan),
         lt(timedEventNotifications.attempts, maxAttempts),
       ))

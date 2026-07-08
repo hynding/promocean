@@ -31,12 +31,21 @@ describe('PgWebhookDeliveryStore', () => {
     const store = new PgWebhookDeliveryStore(db)
     await store.claimTransition('p-md', 'e-md', 'live')
     await store.markDelivered('p-md', 'e-md', 'live')
-    const { rows } = await db.$client.query(
+    const { rows: rows1 } = await db.$client.query(
       `select delivered_at from runtime.timed_event_notifications where project_id='p-md' and event_id='e-md' and transition='live'`,
     )
-    expect(rows[0].delivered_at).not.toBeNull()
+    expect(rows1[0].delivered_at).not.toBeNull()
+    const deliveredAt1 = rows1[0].delivered_at
     // Idempotent: calling again on an already-delivered row is a no-op update, not an error.
-    await expect(store.markDelivered('p-md', 'e-md', 'live')).resolves.toBeUndefined()
+    // Wait a bit to ensure any clock advancement would be visible if idempotency failed.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await store.markDelivered('p-md', 'e-md', 'live')
+    const { rows: rows2 } = await db.$client.query(
+      `select delivered_at from runtime.timed_event_notifications where project_id='p-md' and event_id='e-md' and transition='live'`,
+    )
+    const deliveredAt2 = rows2[0].delivered_at
+    // Timestamp must be unchanged (exact equality) — the second call was a true no-op.
+    expect(deliveredAt2.getTime()).toBe(deliveredAt1.getTime())
   })
 
   it('incrementAttempts increments the attempts counter', async () => {
