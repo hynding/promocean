@@ -7,6 +7,7 @@ import {
   eraseUserResponseSchema,
   offerImpressionRequestSchema,
   offerImpressionResponseSchema,
+  statsQuerySchema,
   statsResponseSchema,
   webhookMessageSchema,
 } from '../src/index.js'
@@ -92,6 +93,28 @@ describe('offerImpressionRequestSchema', () => {
       userId: 'user123',
     })
     expect(result.success).toBe(false)
+  })
+  it('accepts a request with userId omitted (anonymous impression)', () => {
+    const result = offerImpressionRequestSchema.safeParse({
+      impressionId: '550e8400-e29b-41d4-a716-446655440000',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data).toEqual({ impressionId: '550e8400-e29b-41d4-a716-446655440000' })
+  })
+})
+
+describe('statsQuerySchema', () => {
+  it('accepts a valid Z-suffixed ISO datetime for from/to', () => {
+    const result = statsQuerySchema.safeParse({ from: '2026-01-01T00:00:00.000Z', to: '2026-12-31T23:59:59.999Z' })
+    expect(result.success).toBe(true)
+  })
+  it('rejects a junk datetime string', () => {
+    const result = statsQuerySchema.safeParse({ from: 'not-a-date' })
+    expect(result.success).toBe(false)
+  })
+  it('accepts an empty object (both bounds optional)', () => {
+    const result = statsQuerySchema.safeParse({})
+    expect(result.success).toBe(true)
   })
 })
 

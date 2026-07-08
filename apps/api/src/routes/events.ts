@@ -60,7 +60,7 @@ export function eventsRoute(deps: AppDeps) {
     const nameById = new Map(plan.increments.map((i) => [i.achievementId, i.name]))
     const unlocks: TrackEventResponse['unlocks'] = outcome.newUnlocks.map((u) => ({
       achievementId: u.achievementId,
-      name: nameById.get(u.achievementId)!,
+      name: nameById.get(u.achievementId) ?? u.achievementId,
       unlockedAt: u.unlockedAt.toISOString(),
     }))
 

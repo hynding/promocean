@@ -59,6 +59,25 @@ describe('PgIngestionStore', () => {
     expect(await rawProgress('race-user', 'a-race')).toBe(2)
   })
 
+  it('applies 8 concurrent increments without a lost update (n-way race)', async () => {
+    const store = new PgIngestionStore(db)
+    const at = new Date()
+    const userId = 'race-user-8'
+    const achievementId = 'a-race-8'
+    const target = 20
+    await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        store.ingestEvent(
+          scope,
+          { userId, type: 'lesson_completed', idempotencyKey: `race8-${i}`, occurredAt: at },
+          [{ achievementId, delta: 1, target }],
+          '2026-07',
+        ),
+      ),
+    )
+    expect(await rawProgress(userId, achievementId)).toBe(8)
+  })
+
   it('unlocks exactly once when a crossing call reaches the target, and only that call reports newUnlocks', async () => {
     const store = new PgIngestionStore(db)
     const at = new Date()
