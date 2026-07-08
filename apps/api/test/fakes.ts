@@ -77,8 +77,14 @@ export function makeFakes(
     },
   }
   const metrics: { impressions: Array<{ offerId: string; userId: string | null }>; clicks: Array<{ offerId: string; userId: string | null }> } = { impressions: [], clicks: [] }
+  const seenImpressionKeys = new Set<string>()
   const offerMetricsStore: OfferMetricsStore = {
-    recordImpression: async (_s, offerId, userId) => { metrics.impressions.push({ offerId, userId }) },
+    recordImpression: async (s, offerId, userId, _at, idempotencyKey) => {
+      const key = sk(s, idempotencyKey)
+      if (seenImpressionKeys.has(key)) return
+      seenImpressionKeys.add(key)
+      metrics.impressions.push({ offerId, userId })
+    },
     recordClick: async (_s, offerId, userId) => { metrics.clicks.push({ offerId, userId }) },
   }
   const erasedUsers: Array<{ scope: Scope; userId: string }> = []

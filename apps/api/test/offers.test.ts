@@ -16,25 +16,18 @@ function setup() {
 }
 
 describe('GET /v1/placements/:slug/offer', () => {
-  it('resolves the active offer and records an attributed impression', async () => {
+  it('resolves the active offer and records no impression server-side', async () => {
     const { app, fakes } = setup()
     const res = await app.request('/v1/placements/homepage-banner/offer?userId=u1', { headers })
     expect(res.status).toBe(200)
     expect((await res.json()).offer).toMatchObject({ offerId: 'o1', headline: 'Welcome to Promocean' })
-    expect(fakes.metrics.impressions).toEqual([{ offerId: 'o1', userId: 'u1' }])
+    expect(fakes.metrics.impressions).toEqual([])
   })
   it('returns null offer for an empty placement and records nothing', async () => {
     const { app, fakes } = setup()
     const res = await app.request('/v1/placements/sidebar/offer', { headers })
     expect((await res.json()).offer).toBeNull()
     expect(fakes.metrics.impressions).toEqual([])
-  })
-  it('still returns the offer if impression recording throws', async () => {
-    const { app, fakes } = setup()
-    fakes.offerMetricsStore.recordImpression = async () => { throw new Error('db down') }
-    const res = await app.request('/v1/placements/homepage-banner/offer', { headers })
-    expect(res.status).toBe(200)
-    expect((await res.json()).offer?.offerId).toBe('o1')
   })
   it('rejects an invalid placement slug', async () => {
     const { app, fakes } = setup()
@@ -68,5 +61,49 @@ describe('POST /v1/offers/:id/click', () => {
     const res = await app.request(`/v1/offers/${'x'.repeat(129)}/click`, { method: 'POST', headers, body: JSON.stringify({}) })
     expect(res.status).toBe(400)
     expect(fakes.metrics.clicks).toEqual([])
+  })
+})
+
+describe('POST /v1/offers/:id/impression', () => {
+  const impressionId = '11111111-1111-4111-8111-111111111111'
+
+  it('records an impression with optional user attribution', async () => {
+    const { app, fakes } = setup()
+    const res = await app.request('/v1/offers/o1/impression', {
+      method: 'POST', headers, body: JSON.stringify({ impressionId, userId: 'u1' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ recorded: true })
+    expect(fakes.metrics.impressions).toEqual([{ offerId: 'o1', userId: 'u1' }])
+  })
+
+  it('is idempotent on a duplicate impressionId', async () => {
+    const { app, fakes } = setup()
+    const body = JSON.stringify({ impressionId, userId: 'u1' })
+    const first = await app.request('/v1/offers/o1/impression', { method: 'POST', headers, body })
+    const second = await app.request('/v1/offers/o1/impression', { method: 'POST', headers, body })
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(await second.json()).toEqual({ recorded: true })
+    expect(fakes.metrics.impressions).toEqual([{ offerId: 'o1', userId: 'u1' }])
+  })
+
+  it('rejects a non-uuid impressionId', async () => {
+    const { app, fakes } = setup()
+    const res = await app.request('/v1/offers/o1/impression', {
+      method: 'POST', headers, body: JSON.stringify({ impressionId: 'not-a-uuid' }),
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error.code).toBe('invalid_payload')
+    expect(fakes.metrics.impressions).toEqual([])
+  })
+
+  it('rejects an oversized offer id', async () => {
+    const { app, fakes } = setup()
+    const res = await app.request(`/v1/offers/${'x'.repeat(129)}/impression`, {
+      method: 'POST', headers, body: JSON.stringify({ impressionId }),
+    })
+    expect(res.status).toBe(400)
+    expect(fakes.metrics.impressions).toEqual([])
   })
 })

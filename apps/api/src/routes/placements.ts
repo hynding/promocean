@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { PlacementOfferResponse } from '@promocean/contracts'
 import { PLACEMENT_SLUG_PATTERN } from '@promocean/contracts'
@@ -28,16 +27,6 @@ export function placementsRoute(deps: AppDeps) {
       logger.warn({ err }, 'timed events fetch failed; event-attached offers hidden')
     }
     const offer = resolveOffer(slug, offers, now, active)
-    if (offer) {
-      try {
-        // A fresh key per call preserves today's always-record behavior (no dedup
-        // boundary here yet); Task 7 replaces this block with a client-supplied
-        // idempotency key on a dedicated impression-beacon endpoint.
-        await deps.offerMetricsStore.recordImpression(scope, offer.id, userId, now, randomUUID())
-      } catch (err) {
-        logger.warn({ err }, 'impression recording failed')
-      }
-    }
     return c.json({
       offer: offer
         ? { offerId: offer.id, headline: offer.headline, body: offer.body, imageUrl: offer.imageUrl, ctaText: offer.ctaText, ctaUrl: offer.ctaUrl }

@@ -5,6 +5,8 @@ import {
   liveEventsResponseSchema,
   offerClickRequestSchema,
   offerClickResponseSchema,
+  offerImpressionRequestSchema,
+  offerImpressionResponseSchema,
   placementOfferResponseSchema,
   trackEventRequestSchema,
   trackEventResponseSchema,
@@ -37,6 +39,8 @@ export function buildOpenApiDocument(version: string) {
     placementOfferResponse: toSchema(placementOfferResponseSchema),
     offerClickRequest: toSchema(offerClickRequestSchema),
     offerClickResponse: toSchema(offerClickResponseSchema),
+    offerImpressionRequest: toSchema(offerImpressionRequestSchema),
+    offerImpressionResponse: toSchema(offerImpressionResponseSchema),
     liveEventsResponse: toSchema(liveEventsResponseSchema),
     errorEnvelope: toSchema(errorEnvelopeSchema),
   }
@@ -112,6 +116,23 @@ export function buildOpenApiDocument(version: string) {
           '200': {
             description: 'Click recorded.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/offerClickResponse' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/offers/{id}/impression': {
+      post: {
+        summary: 'Record an impression on an offer, deduped by client-supplied impressionId.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/offerImpressionRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'Impression recorded (or already recorded for this impressionId).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/offerImpressionResponse' } } },
           },
           default: errorResponse,
         },
