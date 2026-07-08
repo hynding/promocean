@@ -8,6 +8,7 @@ import {
   offerImpressionRequestSchema,
   offerImpressionResponseSchema,
   placementOfferResponseSchema,
+  statsResponseSchema,
   trackEventRequestSchema,
   trackEventResponseSchema,
   userAchievementsResponseSchema,
@@ -42,6 +43,7 @@ export function buildOpenApiDocument(version: string) {
     offerImpressionRequest: toSchema(offerImpressionRequestSchema),
     offerImpressionResponse: toSchema(offerImpressionResponseSchema),
     liveEventsResponse: toSchema(liveEventsResponseSchema),
+    statsResponse: toSchema(statsResponseSchema),
     errorEnvelope: toSchema(errorEnvelopeSchema),
   }
 
@@ -145,6 +147,26 @@ export function buildOpenApiDocument(version: string) {
           '200': {
             description: 'Live and upcoming timed events.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/liveEventsResponse' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/stats': {
+      get: {
+        summary: 'Aggregate project stats: totals, achievements, offers (with CTR), and timed events. Requires a secret key.',
+        parameters: [
+          { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
+          { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Aggregated stats for the requested range.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/statsResponse' } } },
+          },
+          '403': {
+            description: 'A publishable key was used; a secret key is required.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
           },
           default: errorResponse,
         },

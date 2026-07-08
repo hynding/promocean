@@ -1,6 +1,6 @@
 import type {
   AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, ErasureStore, IngestionStore, OfferDefinition,
-  OfferMetricsStore, ProgressStore, Scope, TimedEventDefinition,
+  OfferMetricsStore, ProgressStore, Scope, StatsStore, TimedEventDefinition,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
@@ -95,5 +95,27 @@ export function makeFakes(
       return erasureCounts
     },
   }
-  return { configStore, apiKeyStore, progressStore, ingestionStore, usage, offerMetricsStore, metrics, erasureStore, erasedUsers, erasureCounts }
+  type StatsResult = Awaited<ReturnType<StatsStore['getStats']>>
+  const statsCalls: Array<{
+    scope: Scope
+    range: { from: Date | null; to: Date | null }
+    timedEventWindows: { eventId: string; startsAt: Date; endsAt: Date }[]
+  }> = []
+  let statsResult: StatsResult = {
+    totals: { events: 0, unlocks: 0, impressions: 0, clicks: 0, timedEventParticipants: 0 },
+    achievements: [],
+    offers: [],
+    timedEvents: [],
+  }
+  const statsStore: StatsStore = {
+    getStats: async (scope, range, timedEventWindows) => {
+      statsCalls.push({ scope, range, timedEventWindows })
+      return statsResult
+    },
+  }
+  const setStatsResult = (r: StatsResult) => { statsResult = r }
+  return {
+    configStore, apiKeyStore, progressStore, ingestionStore, usage, offerMetricsStore, metrics, erasureStore,
+    erasedUsers, erasureCounts, statsStore, statsCalls, setStatsResult,
+  }
 }
