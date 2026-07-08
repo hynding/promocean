@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, lt, lte, sql } from 'drizzle-orm'
 import type { ErasureStore, EventStore, IngestionStore, OfferMetricsStore, ProgressStore, Scope, StatsStore, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
 import { achievementProgress, events, monthlyActiveUsers, offerEvents, timedEventNotifications, unlocks, usageCounters, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
@@ -233,6 +233,44 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
   }
   async recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date) {
     await this.db.insert(webhookDeadLetters).values({ projectId, url, payload, error, createdAt: at })
+  }
+  async markDelivered(projectId: string, eventId: string, transition: TimedEventTransition) {
+    await this.db.update(timedEventNotifications)
+      .set({ deliveredAt: sql`now()` })
+      .where(and(
+        eq(timedEventNotifications.projectId, projectId),
+        eq(timedEventNotifications.eventId, eventId),
+        eq(timedEventNotifications.transition, transition),
+      ))
+  }
+  async findStaleClaims(olderThan: Date, maxAttempts: number) {
+    const rows = await this.db.select({
+      projectId: timedEventNotifications.projectId,
+      eventId: timedEventNotifications.eventId,
+      transition: timedEventNotifications.transition,
+      attempts: timedEventNotifications.attempts,
+    }).from(timedEventNotifications)
+      .where(and(
+        sql`${timedEventNotifications.deliveredAt} is null`,
+        lt(timedEventNotifications.firedAt, olderThan),
+        lt(timedEventNotifications.attempts, maxAttempts),
+      ))
+    return rows.map((r) => ({ ...r, transition: r.transition as TimedEventTransition }))
+  }
+  async incrementAttempts(projectId: string, eventId: string, transition: TimedEventTransition) {
+    await this.db.update(timedEventNotifications)
+      .set({ attempts: sql`${timedEventNotifications.attempts} + 1` })
+      .where(and(
+        eq(timedEventNotifications.projectId, projectId),
+        eq(timedEventNotifications.eventId, eventId),
+        eq(timedEventNotifications.transition, transition),
+      ))
+  }
+  async deleteDeadLettersBefore(cutoff: Date) {
+    const deleted = await this.db.delete(webhookDeadLetters)
+      .where(lt(webhookDeadLetters.createdAt, cutoff))
+      .returning({ id: webhookDeadLetters.id })
+    return deleted.length
   }
 }
 
