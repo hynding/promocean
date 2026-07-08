@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { StrapiConfigPlane } from '../src/index.js'
 
@@ -121,6 +122,98 @@ describe('StrapiConfigPlane.verifyKey', () => {
     await expect(plane.verifyKey('pk_test_demo_1234567890abcdef')).rejects.toThrow()
     await expect(plane.verifyKey('pk_test_demo_1234567890abcdef')).rejects.toThrow()
     expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('StrapiConfigPlane.verifyKey negative auth-cache bound', () => {
+  it('evicts the oldest cached null result once at maxNegativeAuthEntries; the evicted key re-fetches', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('', { status: 404 })))
+    const plane = new StrapiConfigPlane({
+      baseUrl: 'http://cms.test', configSecret: 's3cret', fetchImpl, maxNegativeAuthEntries: 3,
+    })
+
+    await plane.verifyKey('key-0')
+    await plane.verifyKey('key-1')
+    await plane.verifyKey('key-2')
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+
+    // key-1 and key-2 are still cached (no extra fetches).
+    await plane.verifyKey('key-1')
+    await plane.verifyKey('key-2')
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+
+    // 4th distinct null key: at cap, evicts key-0 (the oldest).
+    await plane.verifyKey('key-3')
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
+
+    // key-0 was evicted -> re-fetches. Re-caching it null now evicts key-1 (the new
+    // oldest at cap 3: key-1, key-2, key-3), not key-2 or key-3.
+    await plane.verifyKey('key-0')
+    expect(fetchImpl).toHaveBeenCalledTimes(5)
+
+    // key-2 and key-3 remain cached (unaffected by key-0's re-insertion).
+    await plane.verifyKey('key-2')
+    await plane.verifyKey('key-3')
+    expect(fetchImpl).toHaveBeenCalledTimes(5)
+  })
+
+  it('does not evict positive entries under negative-cache eviction pressure', async () => {
+    const goodKeyHash = createHash('sha256').update('good-key').digest('hex')
+    const fetchImpl = vi.fn().mockImplementation((_url: unknown, init: { body: string }) => {
+      const { keyHash } = JSON.parse(init.body) as { keyHash: string }
+      if (keyHash === goodKeyHash) return ok(authBody)
+      return Promise.resolve(new Response('', { status: 404 }))
+    })
+    const plane = new StrapiConfigPlane({
+      baseUrl: 'http://cms.test', configSecret: 's3cret', fetchImpl, maxNegativeAuthEntries: 2,
+    })
+
+    await plane.verifyKey('good-key') // positive, cached
+    await plane.verifyKey('bad-1') // null (1/2)
+    await plane.verifyKey('bad-2') // null (2/2, at cap)
+    await plane.verifyKey('bad-3') // null: evicts bad-1, positive entry untouched
+    const callsSoFar = fetchImpl.mock.calls.length
+    expect(callsSoFar).toBe(4)
+
+    const goodAgain = await plane.verifyKey('good-key')
+    expect(goodAgain).toEqual(authBody)
+    expect(fetchImpl).toHaveBeenCalledTimes(callsSoFar) // still cached, no extra fetch
+  })
+
+  it('drops a key from null-eviction tracking once it resolves positive, so it is not evicted like a stale null', async () => {
+    vi.useFakeTimers()
+    try {
+      const n0Hash = createHash('sha256').update('n0').digest('hex')
+      let n0Positive = false
+      const fetchImpl = vi.fn().mockImplementation((_url: unknown, init: { body: string }) => {
+        const { keyHash } = JSON.parse(init.body) as { keyHash: string }
+        if (keyHash === n0Hash && n0Positive) return ok(authBody)
+        return Promise.resolve(new Response('', { status: 404 }))
+      })
+      const plane = new StrapiConfigPlane({
+        baseUrl: 'http://cms.test', configSecret: 's3cret', fetchImpl, maxNegativeAuthEntries: 2, cacheTtlMs: 1000,
+      })
+
+      await plane.verifyKey('n0') // null, null-set: [n0]
+      await plane.verifyKey('n1') // null, null-set: [n0, n1] (at cap)
+
+      // Expire n0's entry and have it resolve positive on refetch: it should drop
+      // out of null tracking.
+      vi.advanceTimersByTime(1001)
+      n0Positive = true
+      expect(await plane.verifyKey('n0')).toEqual(authBody) // null-set: [n1]
+
+      await plane.verifyKey('n2') // null, null-set: [n1, n2]
+      await plane.verifyKey('n3') // null: evicts n1 (oldest remaining null), null-set: [n2, n3]
+      expect(fetchImpl).toHaveBeenCalledTimes(5)
+
+      // n0's positive entry must still be cached (not evicted) within its TTL.
+      const callsBeforeRecheck = fetchImpl.mock.calls.length
+      expect(await plane.verifyKey('n0')).toEqual(authBody)
+      expect(fetchImpl).toHaveBeenCalledTimes(callsBeforeRecheck)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

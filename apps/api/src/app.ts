@@ -62,10 +62,12 @@ export interface AppDeps {
 
 export interface CreateAppOptions {
   rateLimitPerMinute?: number
+  rateLimitMaxBuckets?: number
 }
 
 export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
   const rateLimitPerMinute = opts.rateLimitPerMinute ?? Number(process.env.RATE_LIMIT_PER_MINUTE ?? 300)
+  const rateLimitMaxBuckets = opts.rateLimitMaxBuckets ?? Number(process.env.RATE_LIMIT_MAX_BUCKETS ?? 10_000)
   const app = new Hono()
   app.use('*', async (c, next) => {
     const requestId = randomUUID()
@@ -96,7 +98,7 @@ export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
   app.get('/v1/openapi.json', (c) =>
     c.body(openApiBody, 200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' }),
   )
-  app.use('/v1/*', createRateLimiter(rateLimitPerMinute))
+  app.use('/v1/*', createRateLimiter(rateLimitPerMinute, { maxBuckets: rateLimitMaxBuckets }))
   app.use('/v1/*', authMiddleware(deps.apiKeyStore))
   app.route('/v1/events', eventsRoute(deps))
   app.route('/v1/events', liveEventsRoute(deps))

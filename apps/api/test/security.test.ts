@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { Hono } from 'hono'
 import type { AuthContext } from '@promocean/core'
 import { createApp } from '../src/app.js'
+import { createRateLimiter } from '../src/rate-limit.js'
 import { makeFakes } from './fakes.js'
 
 const defs = [
@@ -51,6 +53,53 @@ describe('rate limiting', () => {
     // a different (invalid) token gets its own bucket; still 401 (auth runs after rate limiter) not 429
     const res2 = await app.request('/v1/users/u1/achievements', { headers: { ...headers, authorization: 'Bearer other_key' } })
     expect(res2.status).toBe(401)
+  })
+})
+
+describe('rate limiter bucket bounds', () => {
+  function buildApp(limiter: ReturnType<typeof createRateLimiter>) {
+    const app = new Hono()
+    app.use('*', limiter)
+    app.get('/', (c) => c.text('ok'))
+    return app
+  }
+
+  it('sweeps expired buckets on the requester bucket rollover instead of growing forever', async () => {
+    let now = 0
+    const limiter = createRateLimiter(10, { now: () => now, maxBuckets: 50 })
+    const app = buildApp(limiter)
+
+    // Window 1: 5 distinct keys, one request each.
+    for (let i = 0; i < 5; i++) {
+      await app.request('/', { headers: { authorization: `Bearer key-${i}` } })
+    }
+    expect(limiter._bucketCount()).toBe(5)
+
+    // Advance past the window; a single request from a brand-new key rolls its own
+    // bucket over, which should also sweep the 5 now-expired buckets away.
+    now = 61_000
+    await app.request('/', { headers: { authorization: 'Bearer key-new' } })
+    expect(limiter._bucketCount()).toBe(1)
+  })
+
+  it('shares a single overflow bucket for new keys once at cap, still enforcing the limit (never unlimited, never hard-denied)', async () => {
+    let now = 0
+    const limiter = createRateLimiter(1, { now: () => now, maxBuckets: 2 })
+    const app = buildApp(limiter)
+
+    // Fill the cap with two distinct keys.
+    await app.request('/', { headers: { authorization: 'Bearer key-a' } })
+    await app.request('/', { headers: { authorization: 'Bearer key-b' } })
+    expect(limiter._bucketCount()).toBe(2)
+
+    // Two more distinct new keys arrive at cap: both land in the shared overflow
+    // bucket (bucket count stays bounded at cap+1), and since limitPerMinute is 1,
+    // the second of the two 429s alongside the first at the shared limit.
+    const res1 = await app.request('/', { headers: { authorization: 'Bearer key-c' } })
+    const res2 = await app.request('/', { headers: { authorization: 'Bearer key-d' } })
+    expect(res1.status).toBe(200)
+    expect(res2.status).toBe(429)
+    expect(limiter._bucketCount()).toBe(3) // key-a, key-b, __overflow__
   })
 })
 

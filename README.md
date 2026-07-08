@@ -101,7 +101,10 @@ middleware so tooling can fetch the spec without a key.
 Every key is rate-limited independently at `RATE_LIMIT_PER_MINUTE` requests
 per minute (default `300`; single-instance in-memory bucket, keyed by a hash
 of the key), returning `429 rate_limited` with a `retry-after` header once
-exceeded. Publishable keys additionally enforce an `allowedOrigins`
+exceeded. The number of distinct buckets tracked is bounded by
+`RATE_LIMIT_MAX_BUCKETS` (default `10000`); once at the cap, keys not yet seen
+in the current window share a single overflow bucket (still counted and
+429-able) rather than growing memory unboundedly. Publishable keys additionally enforce an `allowedOrigins`
 allowlist when one is configured on the key: requests carrying an `Origin`
 header not on that list are rejected with `403 origin_not_allowed` (secret
 keys, and requests with no `Origin` header, are exempt from this check).
