@@ -12,7 +12,39 @@ multiplier wins — multipliers don't stack. Progress is always **clamped at
 the achievement target**, so a ×2 event takes 9/10 to 10/10, not 11. Event
 windows (`startsAt`/`endsAt`) are absolute UTC instants, not durations.
 
-## Quickstart (dev)
+## Quickstart
+
+The fastest way to see the whole thing working — clone, then one command:
+
+    git clone https://github.com/hynding/promocean.git
+    cd promocean
+    cp .env.example .env
+    docker compose --profile stack up
+
+This builds and boots Postgres, the Strapi CMS, the API, and the demo app
+(each gated behind healthchecks, so services come up in the right order), and
+seeds a demo project with test API keys. Once it's up:
+
+- `http://localhost:3002/?user=manual-1` — the demo app; click **Complete a
+  lesson** to see an achievement unlock live.
+- `http://localhost:3002/stats` — server-rendered aggregate stats for
+  everything you just did.
+- `http://localhost:1337/admin` — the Strapi CMS admin (log in with the
+  `ADMIN_EMAIL`/`ADMIN_PASSWORD` from your `.env`).
+- `http://localhost:3001/v1/openapi.json` — the API's OpenAPI document.
+
+Tear it down with `docker compose --profile stack down` (add `-v` to also
+drop the Postgres volume).
+
+Note: `.env.example` sets `SEED_DEMO=true`, which seeds a publicly known demo
+publishable key (`pk_test_demo_…`) — fine for local dev and CI, but this must
+never be enabled in a staging or production environment.
+
+## Quickstart (dev, no Docker for the apps)
+
+Postgres still runs in a container (profile-less, so it starts on its own);
+`cms`, `api`, and `demo` run on the host via Turborepo instead of as compose
+services — useful for iterating on app code without rebuilding images:
 
     corepack enable && pnpm install
     pnpm build
@@ -24,10 +56,6 @@ The `dev` task starts every app in parallel via Turborepo, but `cms` and `api`
 each need their own environment configured first — see below for a from-scratch
 setup that boots the full stack (cms + api + demo) and proves the achievement
 loop end to end.
-
-Note: `.env.example` sets `SEED_DEMO=true`, which seeds a publicly known demo
-publishable key (`pk_test_demo_…`) — fine for local dev and CI, but this must
-never be enabled in a staging or production environment.
 
 ### Running the full stack manually
 
@@ -77,7 +105,8 @@ above):
     pnpm --filter demo e2e
 
 This is also run in CI as the `e2e` job in `.github/workflows/ci.yml`, which
-boots Postgres, cms, and api with throwaway secrets before running the spec.
+builds the images and runs `docker compose --profile stack up -d --wait`
+(the same one-command flow above) before running the spec against it.
 
 ## API surface
 
