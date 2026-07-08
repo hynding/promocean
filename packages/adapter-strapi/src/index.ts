@@ -239,8 +239,16 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
                 ? (allowedOrigins as string[])
                 : null,
           }
+        } else {
+          console.warn(
+            '[promocean:adapter-strapi] verify-key response failed validation; treating key as invalid',
+            { issues: parsed.error.issues },
+          )
         }
       }
+      // Deliberate fail-closed trade-off: caching `null` here overwrites even a previously-good
+      // cached AuthContext for one TTL window if the CMS starts returning malformed bodies
+      // (auth boundary: correctness over availability).
       this.authCache.set(keyHash, { value, expires: Date.now() + this.ttl })
       return value
     } catch (err) {

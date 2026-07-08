@@ -14,6 +14,7 @@ export function evaluateEvent(event: TrackedEvent, definitions: AchievementDefin
   const increments: EvaluationPlan['increments'] = []
   for (const def of definitions) {
     if (def.eventType !== event.type) continue
+    // Math.round(1 * multiplier): non-integer multipliers were never truly supported (delta is an integer column).
     increments.push({ achievementId: def.id, name: def.name, delta: Math.round(1 * multiplier), target: def.targetCount })
   }
   return { increments }

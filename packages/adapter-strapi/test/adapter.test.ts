@@ -87,6 +87,18 @@ describe('StrapiConfigPlane.verifyKey', () => {
     const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
     expect(auth).toBeNull()
   })
+  it('warns on a malformed verify-key response body', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, keyType: 'bogus' }))
+      const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
+      expect(auth).toBeNull()
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0][0]).toContain('verify-key response failed validation')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
   it('caches a resolved key within TTL', async () => {
     const fetchImpl = vi.fn().mockImplementation(() => ok(authBody))
     const plane = makePlane(fetchImpl)
