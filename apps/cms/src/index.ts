@@ -44,6 +44,20 @@ export default {
         project: project.documentId,
       },
     })
+    // Secret key: same mechanism as the publishable key above, but keyType
+    // 'secret' — grants access to secret-only endpoints (GET /v1/stats,
+    // DELETE /v1/users/:userId). Server-side only: the demo's /stats page
+    // reads this via PROMOCEAN_SECRET_KEY (never NEXT_PUBLIC_*).
+    const rawSecretKey = 'sk_test_demo_1234567890abcdef'
+    await strapi.documents('api::api-key.api-key').create({
+      data: {
+        keyHash: createHash('sha256').update(rawSecretKey).digest('hex'),
+        keyPrefix: rawSecretKey.slice(0, 12),
+        keyType: 'secret',
+        environment: 'test',
+        project: project.documentId,
+      },
+    })
     const achievements = [
       { name: 'First Lesson', description: 'Complete your first lesson.', eventType: 'lesson_completed', targetCount: 1 },
       { name: 'Getting Started', description: 'Complete ten lessons.', eventType: 'lesson_completed', targetCount: 10 },
@@ -82,9 +96,9 @@ export default {
       },
     })
     if (process.env.LOG_PLAINTEXT_KEYS === 'true') {
-      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key ${rawKey}`)
+      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with keys pk=${rawKey} sk=${rawSecretKey}`)
     } else {
-      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key prefix=pk_test_demo_ (set LOG_PLAINTEXT_KEYS=true in dev to reveal)`)
+      strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with key prefixes pk=pk_test_demo_ sk=sk_test_demo_ (set LOG_PLAINTEXT_KEYS=true in dev to reveal)`)
     }
   },
 }

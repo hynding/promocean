@@ -38,6 +38,10 @@ const offer = await promocean.getPlacementOffer('homepage-banner')
 // Record a click on an offer's CTA (fire-and-forget — never throws).
 await promocean.clickOffer(offer.offerId)
 
+// Record an impression beacon for an offer that actually rendered
+// (fire-and-forget — never throws; idempotent per impressionId).
+await promocean.recordImpression(offer.offerId)
+
 // Dismiss an offer; dismissal is remembered (localStorage, falling back to
 // an in-memory Set when localStorage is unavailable, e.g. SSR).
 promocean.dismissOffer(offer.offerId)
@@ -56,12 +60,39 @@ const liveEvents = await promocean.getLiveEvents()
 | `userId` | `string` | no | Seed the identified user up front instead of calling `identify()`. |
 | `fetchImpl` | `typeof fetch` | no | Override `fetch` (e.g. for testing or non-browser runtimes without a global `fetch`). |
 | `maxRetries` | `number` | no | Retries for 5xx/network failures, with exponential backoff. Default `3`. 4xx errors are never retried. |
+| `secretKey` | `string` | no | **Server-side only.** Grants access to secret-key-only endpoints (currently `getStats()`). See "Server-side stats" below. When you only need `secretKey` (no browser-side calls at all from this client instance), pass `publishableKey: ''` — it's never sent unless a call actually needs it. |
 
 ### Identifying a user
 
 `identify(userId)` sets the current user. `track()` and `getAchievements()`
 throw if called before a user is identified. `getPlacementOffer()` and
 `getLiveEvents()` work anonymously (no `userId` required).
+
+### Server-side stats (`secretKey`)
+
+`getStats()` fetches aggregate totals/achievements/offers/timed-events for
+your project and requires a **secret key** (`sk_...`), not a publishable
+key:
+
+```ts
+// app/stats/page.tsx — a Next.js Server Component, for example
+const promocean = new Promocean({
+  publishableKey: '', // this client only calls getStats(); no pk needed
+  secretKey: process.env.PROMOCEAN_SECRET_KEY!, // server env var, NOT NEXT_PUBLIC_*
+  baseUrl: process.env.PROMOCEAN_API_URL!,
+})
+
+const stats = await promocean.getStats({ from: '2026-01-01T00:00:00.000Z' })
+// { range, totals, achievements, offers (with ctr), timedEvents (with participants) }
+```
+
+**Never ship a secret key to the browser.** Unlike `publishableKey`, a
+`secretKey` must only ever be read from a server-side environment variable
+(no `NEXT_PUBLIC_`/`VITE_`/similar client-exposing prefix) and must only be
+constructed inside server-only code (a Server Component, an API route/route
+handler, a backend service) — never in code that ships to or runs in a
+browser. Calling `getStats()` without a configured `secretKey` throws
+immediately rather than attempting the request.
 
 ### Listening for unlocks
 
