@@ -8,6 +8,7 @@ export const errorCodeSchema = z.enum([
   'forbidden',
   'not_found',
   'internal_error',
+  'unregistered_event_type',
 ])
 export type ErrorCode = z.infer<typeof errorCodeSchema>
 

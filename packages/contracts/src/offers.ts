@@ -24,3 +24,12 @@ export type OfferClickRequest = z.infer<typeof offerClickRequestSchema>
 
 export const offerClickResponseSchema = z.object({ recorded: z.boolean() })
 export type OfferClickResponse = z.infer<typeof offerClickResponseSchema>
+
+export const offerImpressionRequestSchema = z.object({
+  impressionId: z.uuid(),
+  userId: z.string().min(1).max(128).optional(),
+})
+export type OfferImpressionRequest = z.infer<typeof offerImpressionRequestSchema>
+
+export const offerImpressionResponseSchema = z.object({ recorded: z.boolean() })
+export type OfferImpressionResponse = z.infer<typeof offerImpressionResponseSchema>

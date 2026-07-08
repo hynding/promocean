@@ -5,6 +5,9 @@ import {
   errorEnvelopeSchema,
   EVENT_TYPE_PATTERN,
   eraseUserResponseSchema,
+  offerImpressionRequestSchema,
+  offerImpressionResponseSchema,
+  statsResponseSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -71,5 +74,73 @@ describe('eraseUserResponseSchema', () => {
       },
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('offerImpressionRequestSchema', () => {
+  it('round-trips a valid impression request', () => {
+    const payload = {
+      impressionId: '550e8400-e29b-41d4-a716-446655440000',
+      userId: 'user123',
+    }
+    expect(offerImpressionRequestSchema.parse(payload)).toEqual(payload)
+  })
+  it('rejects non-uuid impressionId', () => {
+    const result = offerImpressionRequestSchema.safeParse({
+      impressionId: 'not-a-uuid',
+      userId: 'user123',
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('offerImpressionResponseSchema', () => {
+  it('round-trips a valid impression response', () => {
+    const payload = { recorded: true }
+    expect(offerImpressionResponseSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('statsResponseSchema', () => {
+  it('round-trips a valid stats response', () => {
+    const payload = {
+      range: { from: '2026-01-01T00:00:00.000Z', to: '2026-12-31T23:59:59.999Z' },
+      totals: {
+        events: 100,
+        unlocks: 20,
+        impressions: 50,
+        clicks: 10,
+        timedEventParticipants: 5,
+      },
+      achievements: [{ achievementId: 'a1', unlocks: 5 }],
+      offers: [{ offerId: 'o1', impressions: 10, clicks: 2, ctr: 0.2 }],
+      timedEvents: [{ eventId: 'e1', name: 'Event 1', participants: 3 }],
+    }
+    expect(statsResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('accepts null ctr when impressions are zero', () => {
+    const payload = {
+      range: { from: null, to: null },
+      totals: {
+        events: 0,
+        unlocks: 0,
+        impressions: 0,
+        clicks: 0,
+        timedEventParticipants: 0,
+      },
+      achievements: [],
+      offers: [{ offerId: 'o1', impressions: 0, clicks: 0, ctr: null }],
+      timedEvents: [],
+    }
+    expect(statsResponseSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('error codes', () => {
+  it('accepts unregistered_event_type error code', () => {
+    const result = errorEnvelopeSchema.safeParse({
+      error: { code: 'unregistered_event_type', message: 'Event type not registered' },
+    })
+    expect(result.success).toBe(true)
   })
 })
