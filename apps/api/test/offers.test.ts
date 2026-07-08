@@ -62,6 +62,21 @@ describe('POST /v1/offers/:id/click', () => {
     expect(res.status).toBe(400)
     expect(fakes.metrics.clicks).toEqual([])
   })
+  it('rejects an unknown offer id with 404 and records nothing', async () => {
+    const { app, fakes } = setup()
+    const res = await app.request('/v1/offers/unknown-offer/click', { method: 'POST', headers, body: JSON.stringify({}) })
+    expect(res.status).toBe(404)
+    expect((await res.json()).error).toEqual({ code: 'not_found', message: 'Unknown offer id.' })
+    expect(fakes.metrics.clicks).toEqual([])
+  })
+  it('fails open and records when the config store errors', async () => {
+    const { app, fakes } = setup()
+    fakes.configStore.getOffers = async () => { throw new Error('config plane down') }
+    const res = await app.request('/v1/offers/o1/click', { method: 'POST', headers, body: JSON.stringify({ userId: 'u1' }) })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ recorded: true })
+    expect(fakes.metrics.clicks).toEqual([{ offerId: 'o1', userId: 'u1' }])
+  })
 })
 
 describe('POST /v1/offers/:id/impression', () => {
@@ -105,5 +120,26 @@ describe('POST /v1/offers/:id/impression', () => {
     })
     expect(res.status).toBe(400)
     expect(fakes.metrics.impressions).toEqual([])
+  })
+
+  it('rejects an unknown offer id with 404 and records nothing', async () => {
+    const { app, fakes } = setup()
+    const res = await app.request('/v1/offers/unknown-offer/impression', {
+      method: 'POST', headers, body: JSON.stringify({ impressionId }),
+    })
+    expect(res.status).toBe(404)
+    expect((await res.json()).error).toEqual({ code: 'not_found', message: 'Unknown offer id.' })
+    expect(fakes.metrics.impressions).toEqual([])
+  })
+
+  it('fails open and records when the config store errors', async () => {
+    const { app, fakes } = setup()
+    fakes.configStore.getOffers = async () => { throw new Error('config plane down') }
+    const res = await app.request('/v1/offers/o1/impression', {
+      method: 'POST', headers, body: JSON.stringify({ impressionId, userId: 'u1' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ recorded: true })
+    expect(fakes.metrics.impressions).toEqual([{ offerId: 'o1', userId: 'u1' }])
   })
 })

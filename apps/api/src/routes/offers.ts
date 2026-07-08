@@ -5,6 +5,19 @@ import {
 } from '@promocean/contracts'
 import type { Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
+import { logger } from '../logger.js'
+
+// These routes are reachable with a browser-exposed publishable key, so a config-plane
+// outage must not block writes: on getOffers() failure we fail open (treat the offer as
+// known and record it) rather than 404, trading strict id validation for availability.
+async function isKnownOffer(deps: AppDeps, projectId: string, offerId: string): Promise<boolean> {
+  const offers = await deps.configStore.getOffers(projectId).catch(() => null)
+  if (offers === null) {
+    logger.warn({ projectId, offerId }, 'offer config fetch failed; skipping offer id validation')
+    return true
+  }
+  return offers.some((o) => o.id === offerId)
+}
 
 export function offersRoute(deps: AppDeps) {
   const app = new Hono()
@@ -19,6 +32,9 @@ export function offersRoute(deps: AppDeps) {
     }
     const auth = c.get('auth')
     const scope: Scope = { projectId: auth.projectId, environment: auth.environment }
+    if (!(await isKnownOffer(deps, scope.projectId, offerId))) {
+      return c.json({ error: { code: 'not_found', message: 'Unknown offer id.' } }, 404)
+    }
     await deps.offerMetricsStore.recordClick(scope, offerId, parsed.data.userId ?? null, new Date())
     return c.json({ recorded: true } satisfies OfferClickResponse)
   })
@@ -33,6 +49,9 @@ export function offersRoute(deps: AppDeps) {
     }
     const auth = c.get('auth')
     const scope: Scope = { projectId: auth.projectId, environment: auth.environment }
+    if (!(await isKnownOffer(deps, scope.projectId, offerId))) {
+      return c.json({ error: { code: 'not_found', message: 'Unknown offer id.' } }, 404)
+    }
     await deps.offerMetricsStore.recordImpression(scope, offerId, parsed.data.userId ?? null, new Date(), parsed.data.impressionId)
     return c.json({ recorded: true } satisfies OfferImpressionResponse)
   })
