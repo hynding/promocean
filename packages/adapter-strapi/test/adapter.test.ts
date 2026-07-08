@@ -208,6 +208,20 @@ describe('StrapiConfigPlane.getAllTimedEvents', () => {
     const plane = makePlane(vi.fn().mockImplementation(() => ok({ events: [{ id: '2' }] })))
     await expect(plane.getAllTimedEvents()).rejects.toThrow()
   })
+  it('omits endedWithinMinutes when allTimedEventsEndedWithinMinutes is not configured', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(allTimedEventsBody))
+    const plane = new StrapiConfigPlane({ baseUrl: 'http://cms.test', configSecret: 's3cret', fetchImpl })
+    await plane.getAllTimedEvents()
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://cms.test/api/config-plane/timed-events/all')
+  })
+  it('appends endedWithinMinutes when allTimedEventsEndedWithinMinutes is configured', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(allTimedEventsBody))
+    const plane = new StrapiConfigPlane({
+      baseUrl: 'http://cms.test', configSecret: 's3cret', fetchImpl, allTimedEventsEndedWithinMinutes: 60,
+    })
+    await plane.getAllTimedEvents()
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://cms.test/api/config-plane/timed-events/all?endedWithinMinutes=60')
+  })
 })
 
 const webhookEndpointsBody = {

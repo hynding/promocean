@@ -24,6 +24,9 @@ export interface StrapiConfigPlaneOptions {
   configSecret: string
   cacheTtlMs?: number
   fetchImpl?: typeof fetch
+  /** When set, getAllTimedEvents requests only events that ended within the last N minutes
+   * (or haven't ended yet) via `?endedWithinMinutes=<n>`, keeping the scan feed bounded. */
+  allTimedEventsEndedWithinMinutes?: number
 }
 
 interface CacheEntry<T> { value: T; expires: number }
@@ -145,7 +148,11 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
     const cached = this.allTimedEventsCache.get(key)
     if (cached && cached.expires > Date.now()) return cached.value
     try {
-      const res = await this.fetchImpl(`${this.opts.baseUrl}/api/config-plane/timed-events/all`, {
+      const url = new URL(`${this.opts.baseUrl}/api/config-plane/timed-events/all`)
+      if (this.opts.allTimedEventsEndedWithinMinutes !== undefined) {
+        url.searchParams.set('endedWithinMinutes', String(this.opts.allTimedEventsEndedWithinMinutes))
+      }
+      const res = await this.fetchImpl(url, {
         headers: this.headers(),
       })
       if (!res.ok) throw new Error(`config plane responded ${res.status}`)

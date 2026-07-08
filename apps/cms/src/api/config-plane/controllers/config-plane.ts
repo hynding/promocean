@@ -78,7 +78,16 @@ export default {
   },
   async timedEventsAll(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()
+    // ?endedWithinMinutes=<positive int>: excludes events with endsAt < now - N minutes.
+    // Absent or invalid (non-integer, zero, negative) -> unfiltered, for backward compatibility.
+    const rawParam = String(ctx.query.endedWithinMinutes ?? '')
+    const filters: Record<string, unknown> = {}
+    if (/^[1-9][0-9]*$/.test(rawParam)) {
+      const cutoff = new Date(Date.now() - Number(rawParam) * 60_000)
+      filters.endsAt = { $gte: cutoff.toISOString() }
+    }
     const rows = await strapi.documents('api::timed-event.timed-event').findMany({
+      filters,
       populate: ['project'],
     })
     ctx.body = {
