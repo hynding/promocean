@@ -1,6 +1,8 @@
 import { createHmac } from 'node:crypto'
+import type { Logger } from 'pino'
 import { WEBHOOK_SIGNATURE_HEADER, type WebhookMessage } from '@promocean/contracts'
 import { timedEventState, type ConfigStore, type TimedEventTransition, type WebhookDeliveryStore, type WebhookEndpointDefinition } from '@promocean/core'
+import { logger as rootLogger } from './logger.js'
 
 const BASE_BACKOFF_MS = 250
 
@@ -9,17 +11,20 @@ export class WebhookDispatcher {
   private deliveryStore: WebhookDeliveryStore
   private fetchImpl: typeof fetch
   private maxRetries: number
+  private logger: Logger
 
   constructor(opts: {
     configStore: ConfigStore
     deliveryStore: WebhookDeliveryStore
     fetchImpl?: typeof fetch
     maxRetries?: number
+    logger?: Logger
   }) {
     this.configStore = opts.configStore
     this.deliveryStore = opts.deliveryStore
     this.fetchImpl = opts.fetchImpl ?? ((...a) => globalThis.fetch(...a))
     this.maxRetries = opts.maxRetries ?? 3
+    this.logger = opts.logger ?? rootLogger.child({ component: 'webhooks' })
   }
 
   /** Delivers a signed webhook message to every enabled endpoint for the project. Never throws. */
@@ -28,7 +33,7 @@ export class WebhookDispatcher {
     try {
       endpoints = await this.configStore.getWebhookEndpoints(projectId)
     } catch (err) {
-      console.error('webhook: failed to load endpoints', err)
+      this.logger.error({ err }, 'webhook: failed to load endpoints')
       return
     }
     const rawBody = JSON.stringify(message)
@@ -72,7 +77,7 @@ export class WebhookDispatcher {
     try {
       await this.deliveryStore.recordDeadLetter(projectId, url, payload, error, new Date())
     } catch (err) {
-      console.error('webhook: failed to record dead letter', err)
+      this.logger.error({ err }, 'webhook: failed to record dead letter')
     }
   }
 }
@@ -95,8 +100,10 @@ export function startLifecycleScheduler(opts: {
   deliveryStore: WebhookDeliveryStore
   dispatcher: WebhookDispatcher
   intervalMs?: number
+  logger?: Logger
 }): () => void {
   const { configStore, deliveryStore, dispatcher, intervalMs = 30_000 } = opts
+  const logger = opts.logger ?? rootLogger.child({ component: 'webhooks' })
 
   const tick = async () => {
     try {
@@ -122,7 +129,7 @@ export function startLifecycleScheduler(opts: {
         }
       }
     } catch (err) {
-      console.error('lifecycle scheduler: tick failed', err)
+      logger.error({ err }, 'lifecycle scheduler: tick failed')
     }
   }
 

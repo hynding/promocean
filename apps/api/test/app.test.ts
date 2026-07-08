@@ -64,3 +64,62 @@ describe('GET /healthz', () => {
     expect(res.status).toBe(200)
   })
 })
+
+describe('GET /readyz', () => {
+  it('returns ok with checks: skipped when no readiness deps are configured', async () => {
+    const res = await app().request('/readyz')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, checks: 'skipped' })
+  })
+
+  it('returns 200 when both checks pass', async () => {
+    const deps = { ...makeFakes(defs, auth), readiness: { checkDb: async () => {}, checkConfigPlane: async () => {} } }
+    const res = await createApp(deps).request('/readyz')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+  })
+
+  it('returns 503 naming the failing check when one rejects', async () => {
+    const deps = {
+      ...makeFakes(defs, auth),
+      readiness: { checkDb: async () => { throw new Error('db down') }, checkConfigPlane: async () => {} },
+    }
+    const res = await createApp(deps).request('/readyz')
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ ok: false, failing: ['db'] })
+  })
+
+  it('returns 503 naming both failing checks when both reject', async () => {
+    const deps = {
+      ...makeFakes(defs, auth),
+      readiness: {
+        checkDb: async () => { throw new Error('db down') },
+        checkConfigPlane: async () => { throw new Error('config plane down') },
+      },
+    }
+    const res = await createApp(deps).request('/readyz')
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ ok: false, failing: ['db', 'configPlane'] })
+  })
+
+  it('does not require auth', async () => {
+    const res = await app().request('/readyz')
+    expect(res.status).toBe(200)
+  })
+})
+
+describe('request id middleware', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  it('sets an x-request-id header shaped like a uuid on every response', async () => {
+    const res = await app().request('/healthz')
+    expect(res.headers.get('x-request-id')).toMatch(UUID_RE)
+  })
+
+  it('sets a distinct x-request-id per request', async () => {
+    const a = app()
+    const res1 = await a.request('/healthz')
+    const res2 = await a.request('/healthz')
+    expect(res1.headers.get('x-request-id')).not.toBe(res2.headers.get('x-request-id'))
+  })
+})

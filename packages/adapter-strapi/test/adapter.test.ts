@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { StrapiConfigPlane } from '../src/index.js'
 
 const achievementsBody = { achievements: [{ id: 'a1', name: 'First Lesson', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 1 }] }
-const authBody = { projectId: 'p1', environment: 'test', keyType: 'publishable' }
+const authBody = { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null }
 const ok = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
 
 function makePlane(fetchImpl: typeof fetch, cacheTtlMs = 30_000) {
@@ -53,6 +53,16 @@ describe('StrapiConfigPlane.verifyKey', () => {
   it('returns null on 404', async () => {
     const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('', { status: 404 })))
     expect(await makePlane(fetchImpl).verifyKey('nope_key_123')).toBeNull()
+  })
+  it('maps a valid allowedOrigins array through', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, allowedOrigins: ['https://a.test', 'https://b.test'] }))
+    const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
+    expect(auth?.allowedOrigins).toEqual(['https://a.test', 'https://b.test'])
+  })
+  it('maps a junk allowedOrigins value to null', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, allowedOrigins: ['ok', 42, null] }))
+    const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
+    expect(auth?.allowedOrigins).toBeNull()
   })
 })
 

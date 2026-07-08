@@ -3,6 +3,7 @@ import type { PlacementOfferResponse } from '@promocean/contracts'
 import { PLACEMENT_SLUG_PATTERN } from '@promocean/contracts'
 import { activeEventIds, resolveOffer, type Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
+import { logger } from '../logger.js'
 
 export function placementsRoute(deps: AppDeps) {
   const app = new Hono()
@@ -23,14 +24,14 @@ export function placementsRoute(deps: AppDeps) {
     try {
       active = activeEventIds(await deps.configStore.getTimedEvents(scope.projectId), now)
     } catch (err) {
-      console.error('timed events fetch failed; event-attached offers hidden', err)
+      logger.warn({ err }, 'timed events fetch failed; event-attached offers hidden')
     }
     const offer = resolveOffer(slug, offers, now, active)
     if (offer) {
       try {
         await deps.offerMetricsStore.recordImpression(scope, offer.id, userId, now)
       } catch (err) {
-        console.error('impression recording failed', err)
+        logger.warn({ err }, 'impression recording failed')
       }
     }
     return c.json({

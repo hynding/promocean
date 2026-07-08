@@ -16,7 +16,9 @@
     "@promocean/adapter-strapi": "workspace:*",
     "@promocean/contracts": "workspace:*",
     "@promocean/core": "workspace:*",
-    "hono": "^4.8.0"
+    "hono": "^4.8.0",
+    "pino": "^9.14.0",
+    "zod": "^4.0.5"
   },
   "devDependencies": {
     "@promocean/config": "workspace:*",

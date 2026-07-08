@@ -13,6 +13,12 @@ export function authMiddleware(apiKeyStore: ApiKeyStore) {
     if (!auth) {
       return c.json({ error: { code: 'invalid_api_key', message: 'Missing or invalid API key.' } }, 401)
     }
+    if (auth.keyType === 'publishable' && auth.allowedOrigins?.length) {
+      const origin = c.req.header('origin')
+      if (origin && !auth.allowedOrigins.includes(origin)) {
+        return c.json({ error: { code: 'origin_not_allowed', message: 'Origin not allowed for this key.' } }, 403)
+      }
+    }
     c.set('auth', auth)
     await next()
   }

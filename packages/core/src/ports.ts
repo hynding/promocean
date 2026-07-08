@@ -48,3 +48,7 @@ export interface WebhookDeliveryStore {
   claimTransition(projectId: string, eventId: string, transition: TimedEventTransition): Promise<boolean>
   recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date): Promise<void>
 }
+
+export interface ErasureStore {
+  eraseUser(scope: Scope, userId: string): Promise<{ events: number; progress: number; unlocks: number; offerEvents: number }>
+}

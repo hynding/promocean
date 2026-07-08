@@ -120,6 +120,21 @@ export default {
     })
     const key = rows[0]
     if (!key || !key.project) return ctx.notFound()
-    ctx.body = { projectId: key.project.documentId, environment: key.environment, keyType: key.keyType }
+    const rawOrigins = key.project.allowedOrigins
+    let allowedOrigins: string[] | null
+    if (Array.isArray(rawOrigins) && rawOrigins.every((o: unknown) => typeof o === 'string')) {
+      allowedOrigins = rawOrigins
+    } else if (rawOrigins == null) {
+      allowedOrigins = null
+    } else {
+      strapi.log.warn(`[promocean] project ${key.project.documentId} allowedOrigins is not a string array; ignoring`)
+      allowedOrigins = null
+    }
+    ctx.body = {
+      projectId: key.project.documentId,
+      environment: key.environment,
+      keyType: key.keyType,
+      allowedOrigins,
+    }
   },
 }
