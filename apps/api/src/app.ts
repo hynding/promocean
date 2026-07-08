@@ -27,6 +27,29 @@ const { version: apiVersion } = JSON.parse(readFileSync(pkgPath, 'utf8')) as { v
 const openApiDocument = buildOpenApiDocument(apiVersion)
 const openApiBody = JSON.stringify(openApiDocument)
 
+// Static Redoc viewer for the OpenAPI document. The browser loads the Redoc
+// bundle from its CDN at view time; the API itself takes on no doc-rendering
+// dependency (no redoc package in this app's own dependency tree). Pinned to
+// a specific version (rather than the mutable /latest/ alias) with a
+// Subresource Integrity hash so the CDN can't silently swap the served
+// script; bump both together when upgrading Redoc.
+const docsHtml = `<!doctype html>
+<html>
+  <head>
+    <title>Promocean API docs</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <redoc spec-url="/v1/openapi.json"></redoc>
+    <script
+      src="https://cdn.redoc.ly/redoc/v2.5.3/bundles/redoc.standalone.js"
+      integrity="sha384-xiEssMQFSpSfLbzRZCGfxxIM5QDb2DTrU6vyoZdp2sV1L6pmOMy6MpTtUoLbpC96"
+      crossorigin="anonymous"
+    ></script>
+  </body>
+</html>`
+
 // Races an arbitrary promise against a timeout. AbortSignal.timeout() only
 // helps callers that accept a signal (e.g. fetch); our readiness checks are
 // plain promises, so we race them against a rejecting timer instead.
@@ -98,6 +121,9 @@ export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
   app.get('/v1/openapi.json', (c) =>
     c.body(openApiBody, 200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' }),
   )
+  // Also auth-free, alongside the openapi.json route above: a human-readable
+  // Redoc viewer for the same document.
+  app.get('/docs', (c) => c.html(docsHtml))
   app.use('/v1/*', createRateLimiter(rateLimitPerMinute, { maxBuckets: rateLimitMaxBuckets }))
   app.use('/v1/*', authMiddleware(deps.apiKeyStore))
   app.route('/v1/events', eventsRoute(deps))

@@ -28,7 +28,9 @@ export function statsRoute(deps: AppDeps) {
     try {
       timedEventDefs = await deps.configStore.getTimedEvents(scope.projectId)
     } catch (err) {
-      logger.warn({ err }, 'timed events fetch failed; stats serving with empty timed-event windows')
+      logger.child({ requestId: c.get('requestId') }).warn(
+        { err }, 'timed events fetch failed; stats serving with empty timed-event windows',
+      )
     }
     const windows = timedEventDefs.map((e) => ({ eventId: e.id, startsAt: e.startsAt, endsAt: e.endsAt }))
 

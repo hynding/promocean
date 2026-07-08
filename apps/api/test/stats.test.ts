@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AuthContext } from '@promocean/core'
 import { createApp } from '../src/app.js'
+import { logger } from '../src/logger.js'
 import { makeFakes } from './fakes.js'
 
 const timedEvents = [
@@ -92,5 +93,15 @@ describe('GET /v1/stats', () => {
     const json = await res.json()
     expect(json.timedEvents).toEqual([])
     expect(fakes.statsCalls[0]!.timedEventWindows).toEqual([])
+  })
+
+  it('logs the timed-events fetch failure via a child logger carrying the request id', async () => {
+    const { app, fakes } = setup(skAuth())
+    fakes.configStore.getTimedEvents = async () => { throw new Error('config plane down') }
+    const childSpy = vi.spyOn(logger, 'child')
+    const res = await app.request('/v1/stats', { headers })
+    expect(res.status).toBe(200)
+    expect(childSpy).toHaveBeenCalledWith({ requestId: expect.any(String) })
+    childSpy.mockRestore()
   })
 })

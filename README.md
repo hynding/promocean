@@ -109,6 +109,24 @@ allowlist when one is configured on the key: requests carrying an `Origin`
 header not on that list are rejected with `403 origin_not_allowed` (secret
 keys, and requests with no `Origin` header, are exempt from this check).
 
+### Data retention
+
+`DELETE /v1/users/:userId` erases a user's events, progress, unlocks, and
+offer_events rows in one transaction, but **MAU (monthly active user)
+counter rows are retained** — they exist for usage-based billing history and
+contain only the project/environment/month and the external user id, no
+event content.
+
+**Log retention:** every request is logged (`apps/api/src/app.ts`'s request
+middleware) with the request path, which for user-scoped routes (e.g. `GET
+/v1/users/:userId/achievements`, `DELETE /v1/users/:userId`) includes the
+caller-supplied external `userId` verbatim. Erasure does **not** reach back
+into already-emitted logs — it only deletes database rows. If you ship
+these logs to persistent storage (stdout capture, a log aggregator, etc.),
+applying your own rotation/retention policy — and redacting or expiring user
+identifiers out of it in line with your data-retention obligations — is the
+operator's responsibility, not something this API does for you.
+
 ### Registered event types
 
 Enforcement is opt-in per project: set a project's `registeredEventTypes`
@@ -169,4 +187,18 @@ MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) pu
 
 2. **Bump versions**: Before releasing, run `pnpm changeset version` to consume pending changesets, bump `package.json` versions, and update changelogs. Commit and merge this version bump.
 
-3. **Publish to npm**: Trigger the **Release** workflow from GitHub Actions (Actions → Release → Run workflow). The workflow builds packages and runs `changeset publish`, publishing any versions not yet on npm. Requires the `NPM_TOKEN` repo secret.
+3. **Publish to npm**: Trigger the **Release** workflow from GitHub Actions (Actions → Release → Run workflow). The workflow runs the package test suite, builds packages, and runs `changeset publish` (which also tags each published version — the workflow pushes those tags to origin afterwards), publishing any versions not yet on npm. Requires the `NPM_TOKEN` repo secret.
+
+### Changeset authoring
+
+When you run `pnpm changeset`, only select the packages your change actually
+touched (or whose public behavior it affects transitively). `changeset`
+defaults to listing every package it's asked about, so it's easy to
+over-select — e.g. tick `@promocean/sdk` for a change that only touched
+`@promocean/widgets`. An over-broad changeset produces a changelog entry
+("version bump") on a package with nothing to say why, which is confusing
+for consumers reading release notes. If a package's version is only bumping
+because `updateInternalDependencies: "patch"` cascaded a workspace
+dependency bump (see `.changeset/config.json`), that's expected and separate
+from this — the authoring step is about which packages *you* list, not
+about the automatic dependency-bump cascade.

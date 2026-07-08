@@ -20,7 +20,9 @@ export function eventsRoute(deps: AppDeps) {
     // Config-plane failure must not block ingestion: fail open (same pattern as the
     // multiplier lookup below), just without enforcement for this request.
     const registered = await deps.configStore.getRegisteredEventTypes(scope.projectId).catch((err) => {
-      logger.warn({ err }, 'registered event types fetch failed; skipping unregistered-event-type enforcement')
+      logger.child({ requestId: c.get('requestId') }).warn(
+        { err }, 'registered event types fetch failed; skipping unregistered-event-type enforcement',
+      )
       return [] as string[]
     })
     if (registered.length > 0 && !registered.includes(type)) {
@@ -39,7 +41,7 @@ export function eventsRoute(deps: AppDeps) {
     try {
       multiplier = activeMultiplier(await deps.configStore.getTimedEvents(scope.projectId), occurredAt)
     } catch (err) {
-      logger.warn({ err }, 'timed events fetch failed; defaulting multiplier to 1')
+      logger.child({ requestId: c.get('requestId') }).warn({ err }, 'timed events fetch failed; defaulting multiplier to 1')
     }
 
     const plan = evaluateEvent({ userId, type, occurredAt }, definitions, multiplier)

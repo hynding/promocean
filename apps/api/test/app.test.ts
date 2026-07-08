@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { WebhookDispatcher } from '../src/webhooks.js'
 import { createApp } from '../src/app.js'
+import { logger } from '../src/logger.js'
 import { makeFakes } from './fakes.js'
 
 const defs = [
@@ -83,6 +84,15 @@ describe('POST /v1/events', () => {
     const res = await createApp(fakes).request('/v1/events', { method: 'POST', headers, body: body('k1234567') })
     expect(res.status).toBe(200)
     expect((await res.json()).deduped).toBe(false)
+  })
+  it('logs the registered-event-types fetch failure via a child logger carrying the request id', async () => {
+    const fakes = makeFakes(defs, auth, [], [], ['lesson_completed'])
+    fakes.configStore.getRegisteredEventTypes = async () => { throw new Error('config plane down') }
+    const childSpy = vi.spyOn(logger, 'child')
+    const res = await createApp(fakes).request('/v1/events', { method: 'POST', headers, body: body('k1234567') })
+    expect(res.status).toBe(200)
+    expect(childSpy).toHaveBeenCalledWith({ requestId: expect.any(String) })
+    childSpy.mockRestore()
   })
 })
 

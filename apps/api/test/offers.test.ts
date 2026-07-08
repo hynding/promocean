@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
+import { logger } from '../src/logger.js'
 import { makeFakes } from './fakes.js'
 
 const offer = {
@@ -41,6 +42,15 @@ describe('GET /v1/placements/:slug/offer', () => {
     const res = await app.request(`/v1/placements/homepage-banner/offer?userId=${'x'.repeat(129)}`, { headers })
     expect(res.status).toBe(400)
   })
+  it('fails open (empty active-events set) and logs via a child logger carrying the request id when getTimedEvents throws', async () => {
+    const { app, fakes } = setup()
+    fakes.configStore.getTimedEvents = async () => { throw new Error('config plane down') }
+    const childSpy = vi.spyOn(logger, 'child')
+    const res = await app.request('/v1/placements/homepage-banner/offer?userId=u1', { headers })
+    expect(res.status).toBe(200)
+    expect(childSpy).toHaveBeenCalledWith({ requestId: expect.any(String) })
+    childSpy.mockRestore()
+  })
 })
 
 describe('POST /v1/offers/:id/click', () => {
@@ -76,6 +86,15 @@ describe('POST /v1/offers/:id/click', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ recorded: true })
     expect(fakes.metrics.clicks).toEqual([{ offerId: 'o1', userId: 'u1' }])
+  })
+  it('logs the config fetch failure via a child logger carrying the request id', async () => {
+    const { app, fakes } = setup()
+    fakes.configStore.getOffers = async () => { throw new Error('config plane down') }
+    const childSpy = vi.spyOn(logger, 'child')
+    const res = await app.request('/v1/offers/o1/click', { method: 'POST', headers, body: JSON.stringify({ userId: 'u1' }) })
+    expect(res.status).toBe(200)
+    expect(childSpy).toHaveBeenCalledWith({ requestId: expect.any(String) })
+    childSpy.mockRestore()
   })
 })
 
