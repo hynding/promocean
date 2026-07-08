@@ -1,4 +1,5 @@
-import { integer, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+import { index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 export const runtime = pgSchema('runtime')
 
@@ -12,7 +13,10 @@ export const events = runtime.table('events', {
   occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
   meta: jsonb('meta'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [uniqueIndex('events_idem_uq').on(t.projectId, t.environment, t.idempotencyKey)])
+}, (t) => [
+  uniqueIndex('events_idem_uq').on(t.projectId, t.environment, t.idempotencyKey),
+  index('events_stats_ix').on(t.projectId, t.environment, t.occurredAt),
+])
 
 export const achievementProgress = runtime.table('achievement_progress', {
   projectId: text('project_id').notNull(),
@@ -29,7 +33,10 @@ export const unlocks = runtime.table('unlocks', {
   userId: text('user_id').notNull(),
   achievementId: text('achievement_id').notNull(),
   unlockedAt: timestamp('unlocked_at', { withTimezone: true }).notNull(),
-}, (t) => [uniqueIndex('unlocks_uq').on(t.projectId, t.environment, t.userId, t.achievementId)])
+}, (t) => [
+  uniqueIndex('unlocks_uq').on(t.projectId, t.environment, t.userId, t.achievementId),
+  index('unlocks_stats_ix').on(t.projectId, t.environment, t.achievementId),
+])
 
 export const monthlyActiveUsers = runtime.table('monthly_active_users', {
   projectId: text('project_id').notNull(),
@@ -52,8 +59,14 @@ export const offerEvents = runtime.table('offer_events', {
   offerId: text('offer_id').notNull(),
   userId: text('user_id'),
   kind: text('kind').notNull(), // 'impression' | 'click'
+  idempotencyKey: text('idempotency_key'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+}, (t) => [
+  uniqueIndex('offer_events_idem_uq')
+    .on(t.projectId, t.environment, t.idempotencyKey)
+    .where(sql`${t.kind} = 'impression' and ${t.idempotencyKey} is not null`),
+  index('offer_events_stats_ix').on(t.projectId, t.environment, t.offerId, t.kind),
+])
 
 export const timedEventNotifications = runtime.table('timed_event_notifications', {
   projectId: text('project_id').notNull(),
