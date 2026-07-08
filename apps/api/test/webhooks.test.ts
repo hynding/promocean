@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Logger } from 'pino'
 import { WEBHOOK_SIGNATURE_HEADER, type WebhookMessage } from '@promocean/contracts'
 import type { ConfigStore, TimedEventDefinition, WebhookDeliveryStore, WebhookEndpointDefinition } from '@promocean/core'
-import { WebhookDispatcher, startLifecycleScheduler } from '../src/webhooks.js'
+import { WebhookDispatcher, resolveScanGraceMinutes, startLifecycleScheduler } from '../src/webhooks.js'
 import { createApp } from '../src/app.js'
 import { makeFakes } from './fakes.js'
 
@@ -457,6 +457,59 @@ describe('startLifecycleScheduler — group C4 (scan/redelivery grace ordering a
     stop()
 
     expect(warn).not.toHaveBeenCalled()
+  })
+})
+
+describe('resolveScanGraceMinutes — group C5 (single-sourced scan-grace clamp)', () => {
+  it('clamps and warns when scanGraceMinutes does not exceed redeliveryGraceMinutes', () => {
+    const warn = vi.fn()
+    const testLogger = { warn, error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+    const result = resolveScanGraceMinutes(10, 10, testLogger)
+
+    expect(result).toBe(15)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      { scanGraceMinutes: 10, redeliveryGraceMinutes: 10, clampedScanGraceMinutes: 15 },
+      expect.any(String),
+    )
+  })
+
+  it('passes the value through unchanged with no warning when it already exceeds redeliveryGraceMinutes', () => {
+    const warn = vi.fn()
+    const testLogger = { warn, error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+    const result = resolveScanGraceMinutes(60, 5, testLogger)
+
+    expect(result).toBe(60)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('feeding an already-resolved value to startLifecycleScheduler does not warn a second time (single-source wiring)', async () => {
+    vi.useFakeTimers()
+    try {
+      const configStore = makeConfigStore()
+      const { deliveryStore } = makeDeliveryStore()
+      const dispatcher = fakeDispatcher()
+      const warn = vi.fn()
+      const testLogger = { warn, error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+      // Simulates index.ts: resolve once up front (this is where the single warn fires)...
+      const effectiveScanGrace = resolveScanGraceMinutes(10, 10, testLogger)
+      expect(warn).toHaveBeenCalledTimes(1)
+
+      // ...then hand the already-resolved value to the scheduler, whose internal backstop
+      // clamp must be a no-op and must not warn again.
+      const stop = startLifecycleScheduler({
+        configStore, deliveryStore, dispatcher, intervalMs: 1000, logger: testLogger,
+        redeliveryGraceMinutes: 10, scanGraceMinutes: effectiveScanGrace,
+      })
+      stop()
+
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

@@ -119,4 +119,42 @@ describe('installShutdownHandlers', () => {
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('closing db pool'))
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('complete'))
   })
+
+  it('reuses the in-flight promise when invoked again before the first resolves (reentrancy guard)', async () => {
+    const stopScheduler = vi.fn()
+    // Async close so the first invocation is still in-flight when the second call happens.
+    const server = fakeServer((cb) => { setTimeout(() => cb(), 0) })
+    const pool = fakePool()
+    const logger = fakeLogger()
+
+    const handler = installShutdownHandlers({ stopScheduler, server, pool, logger })
+    const first = handler()
+    const second = handler()
+
+    expect(second).toBe(first)
+    await first
+
+    expect(stopScheduler).toHaveBeenCalledTimes(1)
+    expect(server.close).toHaveBeenCalledTimes(1)
+    expect(pool.end).toHaveBeenCalledTimes(1)
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('already in progress'))
+  })
+
+  it('force-exits with code 1 when server.close never completes within FORCE_EXIT_MS', async () => {
+    vi.useFakeTimers()
+    try {
+      const server = fakeServer(() => { /* never calls back — simulates a hung close */ })
+      const pool = fakePool()
+      const logger = fakeLogger()
+
+      const handler = installShutdownHandlers({ stopScheduler: vi.fn(), server, pool, logger })
+      void handler()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(process.exit).toHaveBeenCalledWith(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

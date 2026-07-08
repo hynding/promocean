@@ -4,14 +4,20 @@ import { StrapiConfigPlane } from '@promocean/adapter-strapi'
 import { createApp } from './app.js'
 import { logger } from './logger.js'
 import { installShutdownHandlers } from './shutdown.js'
-import { WebhookDispatcher, startLifecycleScheduler } from './webhooks.js'
+import { WebhookDispatcher, resolveScanGraceMinutes, startLifecycleScheduler } from './webhooks.js'
 
 const db = createDb(process.env.DATABASE_URL!)
 await runMigrations(db)
-// Same env var (and raw value) the lifecycle scheduler below reads for its own scan window
-// (Sprint 6 Task 3) — kept in sync so the config-plane feed and the scheduler agree on how
-// far back "ended" events are still considered in scope.
-const scanGraceMinutes = Number(process.env.TIMED_EVENT_SCAN_GRACE_MINUTES ?? 60)
+const redeliveryGraceMinutes = Number(process.env.WEBHOOK_REDELIVERY_GRACE_MINUTES ?? 5)
+// Single-sourced (Sprint 6 Task 4 review fix): compute the effective scan-grace window once
+// and hand it to BOTH the config-plane feed and the lifecycle scheduler, so they always agree
+// on how far back "ended" events are still considered in scope. The scheduler's own clamp is
+// kept as a backstop but is a no-op given an already-resolved value.
+const scanGraceMinutes = resolveScanGraceMinutes(
+  Number(process.env.TIMED_EVENT_SCAN_GRACE_MINUTES ?? 60),
+  redeliveryGraceMinutes,
+  logger,
+)
 const plane = new StrapiConfigPlane({
   baseUrl: process.env.STRAPI_URL ?? 'http://localhost:1337',
   configSecret: process.env.CONFIG_PLANE_SECRET!,
@@ -23,7 +29,7 @@ const stopScheduler = startLifecycleScheduler({
   configStore: plane,
   deliveryStore: webhookDeliveryStore,
   dispatcher: webhooks,
-  redeliveryGraceMinutes: Number(process.env.WEBHOOK_REDELIVERY_GRACE_MINUTES ?? 5),
+  redeliveryGraceMinutes,
   scanGraceMinutes,
   deadLetterTtlDays: Number(process.env.WEBHOOK_DEAD_LETTER_TTL_DAYS ?? 30),
 })

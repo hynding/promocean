@@ -136,6 +136,30 @@ function buildTransitionMessage(
   }
 }
 
+/**
+ * Resolves the effective scan-grace window: it must exceed redeliveryGraceMinutes, or a
+ * scan window shorter than the redelivery grace would let events drop out of the feed
+ * before a stale claim could ever be redriven. Warns and clamps to redeliveryGraceMinutes + 5
+ * when violated.
+ *
+ * Single-sourced so the config-plane feed (index.ts) and the lifecycle scheduler always
+ * agree on the same effective value — callers should compute this once and pass the result
+ * to both. `startLifecycleScheduler` also calls this internally as a backstop for callers
+ * that pass a raw value directly; when fed an already-resolved value it is a no-op.
+ */
+export function resolveScanGraceMinutes(scanGraceMinutes: number, redeliveryGraceMinutes: number, logger?: Logger): number {
+  if (scanGraceMinutes <= redeliveryGraceMinutes) {
+    const clampedScanGraceMinutes = redeliveryGraceMinutes + 5
+    const log = logger ?? rootLogger.child({ component: 'webhooks' })
+    log.warn(
+      { scanGraceMinutes, redeliveryGraceMinutes, clampedScanGraceMinutes },
+      'lifecycle scheduler: scanGraceMinutes must exceed redeliveryGraceMinutes; clamping',
+    )
+    return clampedScanGraceMinutes
+  }
+  return scanGraceMinutes
+}
+
 export function startLifecycleScheduler(opts: {
   configStore: ConfigStore
   deliveryStore: WebhookDeliveryStore
@@ -156,15 +180,10 @@ export function startLifecycleScheduler(opts: {
 
   const redeliveryGraceMinutes = opts.redeliveryGraceMinutes ?? 5
   const deadLetterTtlDays = opts.deadLetterTtlDays ?? 30
-  let scanGraceMinutes = opts.scanGraceMinutes ?? 60
-  if (scanGraceMinutes <= redeliveryGraceMinutes) {
-    const clampedScanGraceMinutes = redeliveryGraceMinutes + 5
-    logger.warn(
-      { scanGraceMinutes, redeliveryGraceMinutes, clampedScanGraceMinutes },
-      'lifecycle scheduler: scanGraceMinutes must exceed redeliveryGraceMinutes; clamping',
-    )
-    scanGraceMinutes = clampedScanGraceMinutes
-  }
+  // Backstop clamp: index.ts computes the effective value once via resolveScanGraceMinutes
+  // and passes it to both the config plane and here, so this is normally a no-op. Direct
+  // callers (e.g. tests) that pass a raw value still get the same validation.
+  const scanGraceMinutes = resolveScanGraceMinutes(opts.scanGraceMinutes ?? 60, redeliveryGraceMinutes, logger)
   // scanGraceMinutes is plumbed + validated here; Task 4 passes it to the config-plane scan window.
 
   const redeliveryGraceMs = redeliveryGraceMinutes * 60_000
