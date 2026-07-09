@@ -71,3 +71,19 @@ export interface WebhookEndpointDefinition {
 }
 
 export type PointRules = Record<string, number> // eventType -> points
+
+export interface RewardDefinition {
+  id: string
+  slug: string
+  name: string
+  description: string | null
+  codeType: 'generated' | 'static'
+  staticCode: string | null // populated iff codeType === 'static'
+  codePrefix: string | null // generated codes only
+  pointsPrice: number // 0 = free
+  startsAt: Date | null
+  endsAt: Date | null
+  perUserLimit: number
+  inventory: number | null // null = uncapped
+  enabled: boolean
+}

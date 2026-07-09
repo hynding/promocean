@@ -1,4 +1,5 @@
-import type { AchievementDefinition, AuthContext, OfferDefinition, PointRules, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
+import type { ClaimRejection } from './rewards.js'
+import type { AchievementDefinition, AuthContext, OfferDefinition, PointRules, RewardDefinition, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
 
 export interface ConfigStore {
   getAchievements(projectId: string): Promise<AchievementDefinition[]>
@@ -8,6 +9,7 @@ export interface ConfigStore {
   getWebhookEndpoints(projectId: string): Promise<WebhookEndpointDefinition[]>
   getRegisteredEventTypes(projectId: string): Promise<string[]>
   getPointRules(projectId: string): Promise<PointRules>
+  getRewards(projectId: string): Promise<RewardDefinition[]>
 }
 
 export interface ApiKeyStore {
@@ -78,7 +80,7 @@ export interface IngestionStore {
 }
 
 export interface EngagementStore {
-  getWallet(scope: Scope, userId: string): Promise<{ balance: number; recent: Array<{ delta: number; source: 'event' | 'unlock'; sourceRef: string; at: Date }> }>
+  getWallet(scope: Scope, userId: string): Promise<{ balance: number; recent: Array<{ delta: number; source: 'event' | 'unlock' | 'redemption'; sourceRef: string; at: Date }> }>
   getStreak(scope: Scope, userId: string): Promise<{ current: number; longest: number; lastActiveDay: string | null }>
   getLeaderboard(scope: Scope, window: 'all' | '7d' | '30d', limit: number): Promise<Array<{ rank: number; userId: string; points: number }>>
 }
@@ -113,5 +115,29 @@ export interface WebhookDeliveryStore {
 }
 
 export interface ErasureStore {
-  eraseUser(scope: Scope, userId: string): Promise<{ events: number; progress: number; unlocks: number; offerEvents: number; pointsLedger: number; streaks: number }>
+  eraseUser(scope: Scope, userId: string): Promise<{ events: number; progress: number; unlocks: number; offerEvents: number; pointsLedger: number; streaks: number; coupons: number }>
+}
+
+export interface RewardStore {
+  getClaimCounts(scope: Scope, rewardIds: string[]): Promise<Map<string, number>>
+  /**
+   * Re-runs decideClaim INSIDE its transaction with locked counts/balance — the route's
+   * pre-check (via decideClaim) is a fast path only, never the authoritative guard.
+   */
+  claimCoupon(scope: Scope, userId: string, reward: RewardDefinition, now: Date): Promise<
+    | { ok: true; couponId: string; code: string; claimedAt: Date; pointsSpent: number }
+    | { ok: false; reason: ClaimRejection }
+  >
+  /**
+   * Prefers an unredeemed row when the code is shared: reports 'claimed' if ANY unredeemed
+   * claim exists for the code.
+   */
+  validateCoupon(scope: Scope, code: string): Promise<
+    | { found: false }
+    | { found: true; rewardId: string; status: 'claimed' | 'redeemed' }
+  >
+  redeemCoupon(scope: Scope, code: string): Promise<
+    | { ok: true; rewardId: string; redeemedAt: Date }
+    | { ok: false; reason: 'not_found' | 'already_redeemed' }
+  >
 }
