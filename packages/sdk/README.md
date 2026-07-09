@@ -59,6 +59,8 @@ promocean.isOfferDismissed(offer.offerId) // true
 
 // Get currently scheduled/live/ending-soon timed events (progress multipliers).
 const liveEvents = await promocean.getLiveEvents()
+// [{ eventId, name, state, startsAt, endsAt, multiplier, secondsUntilStart, secondsUntilEnd,
+//    recurrence, nextOccurrenceStartsAt }] — see "Recurring events" below.
 
 // List rewards currently claimable, then claim one for the identified user.
 const rewards = await promocean.listRewards()
@@ -78,7 +80,7 @@ await promocean.redeemCoupon(code)                    // { redeemed: true, rewar
 | `userId` | `string` | no | Seed the identified user up front instead of calling `identify()`. |
 | `fetchImpl` | `typeof fetch` | no | Override `fetch` (e.g. for testing or non-browser runtimes without a global `fetch`). |
 | `maxRetries` | `number` | no | Retries for 5xx/network failures, with exponential backoff. Default `3`. 4xx errors are never retried. |
-| `secretKey` | `string` | no | **Server-side only.** Grants access to secret-key-only endpoints (currently `getStats()`). See "Server-side stats" below. When you only need `secretKey` (no browser-side calls at all from this client instance), pass `publishableKey: ''` — it's never sent unless a call actually needs it. |
+| `secretKey` | `string` | no | **Server-side only.** Grants access to secret-key-only endpoints (`getStats()`, `validateCoupon()`, `redeemCoupon()`, `backfillAchievement()`). See "Server-side stats" below. When you only need `secretKey` (no browser-side calls at all from this client instance), pass `publishableKey: ''` — it's never sent unless a call actually needs it. |
 
 ### Identifying a user
 
@@ -116,6 +118,21 @@ their points — anyone holding your `pk_...` key can see it. If your
 opaque/pseudonymous id to `identify()`/`track()` instead and map it to a
 display name in your own app before showing a leaderboard; Promocean has no
 notion of identity beyond the id you give it.
+
+### Recurring events
+
+A `LiveTimedEvent` from `getLiveEvents()` can carry a `recurrence` of
+`'none' | 'daily' | 'weekly' | 'monthly'` (defaults to `'none'` — old-server
+responses without this field, or the `nextOccurrenceStartsAt` field below,
+still parse). `startsAt`/`endsAt` are always the **current-or-next
+occurrence's** window, not the event definition's original one, so a
+weekly event you fetch three weeks from now still reports this week's (or
+next week's) window, not the original. `nextOccurrenceStartsAt` is the
+start of the occurrence after the one reported — `null` once the event's
+recurrence has ended (its `recurrenceEndsAt` has passed) and no further
+occurrence exists. See the root README's "Timed events" section for the
+UTC-instant drift note and the scheduler-downtime edge that applies to
+recurring events specifically.
 
 ### Server-side stats (`secretKey`)
 
@@ -181,6 +198,29 @@ this source value will fail zod-parsing a wallet response once any
 redemption exists in your project. Upgrade both packages together before
 spending/rewards go live.
 
+### Retroactive achievement backfill (`secretKey`)
+
+`backfillAchievement(achievementId)` is **server-side only** — same
+`secretKey` posture as `getStats()`/`validateCoupon()`/`redeemCoupon()`
+above, and throws immediately if `secretKey` isn't configured:
+
+```ts
+promocean.backfillAchievement(achievementId: string): Promise<BackfillResponse>
+// { usersEvaluated, progressRaised, unlocksGranted, pointsAwarded }
+// Throws PromoceanApiError with code 'not_found' (404) for an unknown achievement id, or
+// 'forbidden' (403) if called without a secret key.
+```
+
+Recomputes the named achievement's progress/unlocks/points against **all**
+historical events of its `eventType` for every user in the project — the
+operator flow for granting an achievement retroactively after adding it (or
+changing its target/points) once events already exist. See the root
+README's "Retroactive achievement backfill" section for the full operator
+flow, including the wallet/leaderboard-moving decision (a retroactive
+unlock pays out its `pointsValue` bonus exactly like a live one) and why
+re-running it against unchanged data is idempotent (`unlocksGranted: 0,
+pointsAwarded: 0`, not an error).
+
 ### Listening for unlocks
 
 ```ts
@@ -237,6 +277,6 @@ misconfigured or compromised CMS content.
 Request/response shapes (`TrackEventResponse`, `AchievementStatus`,
 `OfferCreative`, `UnlockPayload`, `LiveTimedEvent`, `WalletResponse`,
 `StreakResponse`, `LeaderboardResponse`, `Reward`, `ClaimRewardResponse`,
-`ValidateCouponResponse`, `RedeemCouponResponse`, etc.) are re-exported
+`ValidateCouponResponse`, `RedeemCouponResponse`, `BackfillResponse`, `Recurrence`, etc.) are re-exported
 from `@promocean/contracts` and validated at runtime with zod — a malformed
 API response throws rather than silently returning bad data.

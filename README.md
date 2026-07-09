@@ -12,6 +12,75 @@ multiplier wins — multipliers don't stack. Progress is always **clamped at
 the achievement target**, so a ×2 event takes 9/10 to 10/10, not 11. Event
 windows (`startsAt`/`endsAt`) are absolute UTC instants, not durations.
 
+**Recurrence:** a timed event can additionally be configured with a
+`recurrence` of `'daily' | 'weekly' | 'monthly'` (default `'none'`) and an
+optional `recurrenceEndsAt` cutoff. `GET /v1/events/live` and the SDK's
+`getLiveEvents()` always report the **current-or-next occurrence's**
+`startsAt`/`endsAt` — not the definition's original window — plus the
+`recurrence` value itself and a `nextOccurrenceStartsAt` (the start of the
+occurrence after the reported one; `null` once `recurrenceEndsAt` has
+passed and no more occurrences exist). For a fixed-interval recurrence
+(`daily`/`weekly`) `nextOccurrenceStartsAt` is exactly `startsAt` plus that
+interval; `monthly` anchors to the definition's original day-of-month, so
+short months clamp instead of drifting (e.g. a 31st-of-the-month event's
+February occurrence falls back to the 28th/29th, and the occurrence after
+that still anchors to the 31st where the calendar allows it).
+
+- **Per-occurrence webhooks:** each occurrence of a recurring event fires
+  its own independent `timed_event.live` / `.ending_soon` / `.ended`
+  transitions (see Webhooks below) — a weekly event firing every week is
+  not "the same" transition recurring, it's a fresh set of transitions per
+  occurrence, each individually claimed/delivered/redelivered.
+- **Multiplier applies in every occurrence:** the event's `multiplier`
+  isn't a one-time bonus — it applies for the full duration of *every*
+  occurrence while recurrence is active, not just the first.
+- **UTC-instant drift note:** because `startsAt` (and therefore every
+  computed occurrence) is an absolute UTC instant, a recurring event
+  anchored to, say, 17:00 UTC does **not** track "5pm local time" through
+  daylight-saving transitions in any particular timezone — it's always
+  17:00 UTC, which shifts relative to local clocks that observe DST. Anchor
+  `startsAt` in UTC deliberately if you need a fixed wall-clock time in a
+  specific timezone across DST boundaries.
+- **Scheduler-downtime edge:** the lifecycle scheduler only looks back
+  `TIMED_EVENT_SCAN_GRACE_MINUTES` (see the Webhooks table below) for
+  transitions to fire. If the api process is down longer than that grace
+  window, occurrences (including entire recurring-event occurrences) that
+  started and ended entirely during the outage are skipped permanently —
+  no claim is ever made for them and no dead letter is recorded. Size the
+  grace window to your expected downtime, and remember it applies
+  per-occurrence: a long outage can silently skip several occurrences of a
+  short-interval (e.g. daily) recurring event.
+
+### Retroactive achievement backfill
+
+`POST /v1/achievements/:id/backfill` (secret key only) recomputes an
+achievement's progress/unlocks/points against **all** historical events of
+its `eventType`, for every user in the project/environment — the operator
+flow for "I added (or changed the target/points of) an achievement after
+events had already been ingested, and want existing users to retroactively
+qualify." It returns a summary: `{ usersEvaluated, progressRaised,
+unlocksGranted, pointsAwarded }`. Rejected with `403 forbidden` for
+publishable keys, `404 not_found` for an unknown achievement id.
+
+**This moves wallets and leaderboards by design.** A retroactive unlock
+awards that achievement's `pointsValue` bonus into the user's wallet (a
+`points_ledger` row, same as a live unlock) exactly as if they'd unlocked it
+the moment they qualified — so running a backfill after raising an
+achievement's `pointsValue`, or after a user's historical events newly
+qualify them, will change wallet balances and leaderboard rankings
+immediately, with no separate confirmation step. If that's not the outcome
+you want (e.g. you only want the badge, not the retroactive points), don't
+backfill — no other endpoint offers a "recompute without paying out" mode.
+
+**Idempotent by construction:** running backfill again for the same
+achievement never double-grants — a user already unlocked (live or by a
+previous backfill) contributes `0` to `unlocksGranted`/`pointsAwarded` on
+a subsequent run; only users who newly cross the target since the last run
+are granted. `usersEvaluated` still counts everyone with matching event
+history, so a `usersEvaluated: 5, unlocksGranted: 0, pointsAwarded: 0`
+result is the expected, correct output of a re-run against unchanged data —
+not a failure.
+
 ## Quickstart
 
 The fastest way to see the whole thing working — clone, then one command:
@@ -107,7 +176,12 @@ the full earn/burn loop — claiming a free static-code reward, being blocked
 on a priced reward by insufficient points, earning enough to claim it
 (generated code, balance debited), the `/stats` page's coupon
 validate/redeem/re-redeem-409 flow, and that erasure counts the claimed
-coupons. With cms + api already running (per above):
+coupons; `campaign-lifecycle.spec.ts` proves the seeded recurring `Weekly
+Happy Hour` event reports a consistent `recurrence`/`nextOccurrenceStartsAt`
+on the live feed and renders in the countdown widget, and that retroactive
+achievement backfill is idempotent after a live unlock (both via a direct
+API call and the `/stats` page's operator-facing backfill form). With cms +
+api already running (per above):
 
     pnpm --filter demo exec playwright install chromium
     pnpm --filter demo e2e
@@ -140,6 +214,7 @@ middleware so tooling can fetch the spec without a key.
 | POST | `/v1/coupons/validate` | sk only | Look up a coupon code without redeeming it: `{ valid, rewardSlug?, status?, reason? }`. Rejected with `403 forbidden` for publishable keys. |
 | POST | `/v1/coupons/redeem` | sk only | Redeem a coupon code (one-time). Rejected with `409 already_redeemed` on a second redemption, `409 reward_unavailable` if the reward has since expired, or `404 not_found` for an unknown code. Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. Rejected with `403 forbidden` for publishable keys. |
+| POST | `/v1/achievements/:id/backfill` | sk only | Retroactively recompute progress/unlocks/points for an achievement against all historical events of its `eventType` — see "Retroactive achievement backfill" above. Rejected with `403 forbidden` for publishable keys, `404 not_found` for an unknown achievement id. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
 | GET | `/docs` | none | Serve an HTML API reference (Redoc) rendered from the same OpenAPI document. |
 
@@ -300,6 +375,18 @@ timed-event transition is sent as a brand-new message with a fresh
 `x-promocean-signature` HMAC header and check the signed `createdAt`
 against a replay window (e.g. reject anything older than a few minutes) —
 both belong in your consumer regardless of transport.
+
+**Recurring events fire per-occurrence:** `data.startsAt`/`data.endsAt` on a
+`timed_event.*` message always describe the event **definition's** own
+window (wire-stable, unaffected by recurrence). For a recurring event, an
+additive `data.occurrence: { startsAt, endsAt }` field carries the specific
+occurrence's window that actually fired this transition — every occurrence
+of a recurring event claims, delivers, and redelivers independently, keyed
+internally by that occurrence's start instant, so a weekly event firing for
+ten straight weeks produces ten fully independent sets of
+live/ending_soon/ended messages, not one recurring message. This field is
+absent entirely for non-recurring events. The HMAC signature and
+`messageId` semantics are unaffected — `data.occurrence` is purely additive.
 
 Timed-event delivery is claim-then-mark: the scheduler claims a transition
 once, delivers it to every enabled endpoint (each endpoint independently
