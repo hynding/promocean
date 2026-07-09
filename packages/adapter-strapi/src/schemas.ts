@@ -81,6 +81,26 @@ export const pointRulesResponseSchema = z.object({
   pointRules: z.record(z.string(), z.number()),
 })
 
+export const rewardsResponseSchema = z.object({
+  rewards: z.array(
+    z.object({
+      id: z.string(),
+      slug: z.string(),
+      name: z.string(),
+      description: z.string().nullable(),
+      codeType: z.enum(['generated', 'static']),
+      staticCode: z.string().nullable(),
+      codePrefix: z.string().nullable(),
+      pointsPrice: z.number().int().min(0),
+      startsAt: z.iso.datetime().nullable(),
+      endsAt: z.iso.datetime().nullable(),
+      perUserLimit: z.number().int().min(1),
+      inventory: z.number().int().min(1).nullable(),
+      enabled: z.boolean(),
+    }),
+  ),
+})
+
 // allowedOrigins is intentionally z.unknown(): a junk value (wrong element types, non-array,
 // etc.) must not fail the whole parse — it degrades to `null` in AuthContext, same as today.
 // environment/keyType, by contrast, must validate strictly: a bad enum means the CMS record
