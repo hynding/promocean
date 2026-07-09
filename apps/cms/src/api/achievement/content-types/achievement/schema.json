@@ -9,6 +9,7 @@
     "artworkUrl": { "type": "string" },
     "eventType": { "type": "string", "required": true, "regex": "^[a-z][a-z0-9_]*$" },
     "targetCount": { "type": "integer", "required": true, "min": 1, "default": 1 },
+    "pointsValue": { "type": "integer", "min": 0, "default": 0 },
     "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
   }
 }

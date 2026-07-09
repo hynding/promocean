@@ -465,6 +465,14 @@ export interface ApiAchievementAchievement extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    pointsValue: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
     project: Schema.Attribute.Relation<'manyToOne', 'api::project.project'>;
     publishedAt: Schema.Attribute.DateTime;
     targetCount: Schema.Attribute.Integer &
@@ -614,6 +622,7 @@ export interface ApiProjectProject extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    pointRules: Schema.Attribute.JSON;
     publishedAt: Schema.Attribute.DateTime;
     registeredEventTypes: Schema.Attribute.JSON;
     slug: Schema.Attribute.UID<'name'>;

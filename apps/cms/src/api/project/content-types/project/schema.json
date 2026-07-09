@@ -7,6 +7,7 @@
     "name": { "type": "string", "required": true },
     "slug": { "type": "uid", "targetField": "name" },
     "allowedOrigins": { "type": "json" },
-    "registeredEventTypes": { "type": "json" }
+    "registeredEventTypes": { "type": "json" },
+    "pointRules": { "type": "json" }
   }
 }
