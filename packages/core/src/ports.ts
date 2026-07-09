@@ -84,6 +84,10 @@ export interface WebhookDeliveryStore {
   /** Rows where delivered_at IS NULL AND fired_at < olderThan AND attempts < maxAttempts. */
   findStaleClaims(olderThan: Date, maxAttempts: number): Promise<Array<{ projectId: string; eventId: string; transition: TimedEventTransition; attempts: number }>>
   incrementAttempts(projectId: string, eventId: string, transition: TimedEventTransition): Promise<void>
+  /** Rows where delivered_at IS NULL AND attempts >= minAttempts — claims findStaleClaims
+   * excludes forever once they've exhausted their redelivery attempts. Callers dead-letter
+   * and mark these delivered so the loop stops rather than leaving them orphaned. */
+  findExhaustedClaims(minAttempts: number): Promise<Array<{ projectId: string; eventId: string; transition: TimedEventTransition; attempts: number }>>
   /** Deletes dead letters created before cutoff. Returns the number deleted. */
   deleteDeadLettersBefore(cutoff: Date): Promise<number>
 }

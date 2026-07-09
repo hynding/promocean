@@ -235,6 +235,30 @@ export function startLifecycleScheduler(opts: {
       logger.error({ err }, 'lifecycle scheduler: redelivery sweep failed')
     }
 
+    // Phase 2b: exhaustion sweep — claims that hit MAX_REDELIVERY_ATTEMPTS are excluded by
+    // findStaleClaims forever; dead-letter and mark them delivered here so they stop being
+    // silently orphaned (per plan: cap retries, then dead-letter + stop the loop).
+    try {
+      const exhaustedClaims = await deliveryStore.findExhaustedClaims(MAX_REDELIVERY_ATTEMPTS)
+      for (const claim of exhaustedClaims) {
+        try {
+          await deliveryStore.recordDeadLetter(
+            claim.projectId,
+            '<exhausted>',
+            JSON.stringify(claim),
+            'redelivery attempts exhausted',
+            now,
+          )
+          await deliveryStore.markDelivered(claim.projectId, claim.eventId, claim.transition)
+          logger.warn({ claim }, 'lifecycle scheduler: redelivery attempts exhausted, dead-lettering claim')
+        } catch (err) {
+          logger.error({ err, claim }, 'lifecycle scheduler: failed to dead-letter exhausted claim')
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'lifecycle scheduler: exhaustion sweep failed')
+    }
+
     // Phase 3: retention sweep — purge old dead letters.
     try {
       const cutoff = new Date(now.getTime() - deadLetterTtlDays * 24 * 60 * 60 * 1000)

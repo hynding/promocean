@@ -267,6 +267,19 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
         eq(timedEventNotifications.transition, transition),
       ))
   }
+  async findExhaustedClaims(minAttempts: number) {
+    const rows = await this.db.select({
+      projectId: timedEventNotifications.projectId,
+      eventId: timedEventNotifications.eventId,
+      transition: timedEventNotifications.transition,
+      attempts: timedEventNotifications.attempts,
+    }).from(timedEventNotifications)
+      .where(and(
+        isNull(timedEventNotifications.deliveredAt),
+        gte(timedEventNotifications.attempts, minAttempts),
+      ))
+    return rows.map((r) => ({ ...r, transition: r.transition as TimedEventTransition }))
+  }
   async deleteDeadLettersBefore(cutoff: Date) {
     const deleted = await this.db.delete(webhookDeadLetters)
       .where(lt(webhookDeadLetters.createdAt, cutoff))

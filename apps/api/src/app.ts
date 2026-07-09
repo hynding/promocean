@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { ApiKeyStore, ConfigStore, ErasureStore, IngestionStore, OfferMetricsStore, ProgressStore, StatsStore } from '@promocean/core'
 import { authMiddleware } from './auth.js'
+import { envInt } from './env.js'
 import { logger } from './logger.js'
 import { buildOpenApiDocument } from './openapi.js'
 import { createRateLimiter } from './rate-limit.js'
@@ -89,8 +90,8 @@ export interface CreateAppOptions {
 }
 
 export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
-  const rateLimitPerMinute = opts.rateLimitPerMinute ?? Number(process.env.RATE_LIMIT_PER_MINUTE ?? 300)
-  const rateLimitMaxBuckets = opts.rateLimitMaxBuckets ?? Number(process.env.RATE_LIMIT_MAX_BUCKETS ?? 10_000)
+  const rateLimitPerMinute = opts.rateLimitPerMinute ?? envInt('RATE_LIMIT_PER_MINUTE', 300)
+  const rateLimitMaxBuckets = opts.rateLimitMaxBuckets ?? envInt('RATE_LIMIT_MAX_BUCKETS', 10_000)
   const app = new Hono()
   app.use('*', async (c, next) => {
     const requestId = randomUUID()

@@ -126,6 +126,7 @@ middleware so tooling can fetch the spec without a key.
 | GET | `/v1/events/live` | pk or sk | List scheduled/live/ending-soon timed events and their multipliers. |
 | GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
+| GET | `/docs` | none | Serve an HTML API reference (Redoc) rendered from the same OpenAPI document. |
 
 Every key is rate-limited independently at `RATE_LIMIT_PER_MINUTE` requests
 per minute (default `300`; single-instance in-memory bucket, keyed by a hash
@@ -190,9 +191,14 @@ marking, the claim is left stale and a later tick's **redelivery sweep**
 re-drives it (incrementing an attempt counter, capped at 5 attempts) with a
 freshly built message and a new `messageId`, as above. A **retention
 sweep** on the same tick purges dead letters older than
-`WEBHOOK_DEAD_LETTER_TTL_DAYS` (default 30). A disabled event that was
-never observed live emits no `ended` message — disabling before an event
-ever went live means no lifecycle transition ever fired for it.
+`WEBHOOK_DEAD_LETTER_TTL_DAYS` (default 30). Once redelivery attempts hit
+the cap of 5, an **exhaustion sweep** on the same tick dead-letters the
+claim (`<exhausted>`) and marks it delivered so it stops being retried.
+Disabling an event stops its lifecycle transitions
+from firing at whatever point the disable happens: an event disabled
+before ever going live emits no messages at all, and one disabled after
+going live emits no `ended` message either — its state simply snaps back
+to draft.
 
 The dispatcher `POST`s directly to whatever URL a project configures as a
 webhook endpoint. There is currently no SSRF protection (e.g. blocking
@@ -205,7 +211,7 @@ Scheduler tuning (all optional, read once at process start):
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `WEBHOOK_REDELIVERY_GRACE_MINUTES` | `5` | How long a claimed-but-undelivered transition sits before the redelivery sweep re-drives it. |
-| `TIMED_EVENT_SCAN_GRACE_MINUTES` | `60` | How far back the config-plane scan window looks for timed events. Must exceed the redelivery grace (a shorter scan window would let events drop out of the feed before a stale claim could ever be redriven) — if misconfigured, the scheduler logs a warning at startup and clamps it to `WEBHOOK_REDELIVERY_GRACE_MINUTES + 5`. |
+| `TIMED_EVENT_SCAN_GRACE_MINUTES` | `60` | How far back the config-plane scan window looks for timed events. Must exceed the redelivery grace (a shorter scan window would let events drop out of the feed before a stale claim could ever be redriven) — if misconfigured, the scheduler logs a warning at startup and clamps it to `WEBHOOK_REDELIVERY_GRACE_MINUTES + 5`. If the api is down longer than this grace, transitions that occurred during the outage are dropped permanently — no claim is ever made and no dead letter is recorded — so size it to your expected downtime. |
 | `WEBHOOK_DEAD_LETTER_TTL_DAYS` | `30` | Dead letters older than this are purged by the retention sweep. |
 
 ## Publishing

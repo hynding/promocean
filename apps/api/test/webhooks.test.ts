@@ -25,6 +25,7 @@ function makeDeliveryStore() {
     markDelivered: async () => {},
     findStaleClaims: async () => [],
     incrementAttempts: async () => {},
+    findExhaustedClaims: async () => [],
     deleteDeadLettersBefore: async () => 0,
   }
   return { deliveryStore, deadLetters }
@@ -375,6 +376,74 @@ describe('startLifecycleScheduler — group C2 (redelivery sweep)', () => {
     expect(deadLetters[0]).toMatchObject({ projectId: 'p1', url: '<unresolvable>', error: 'event definition no longer in scan window' })
     expect(JSON.parse(deadLetters[0].payload)).toEqual({ projectId: 'p1', eventId: 'gone-1', transition: 'ended', attempts: 3 })
     expect(marked).toEqual([['p1', 'gone-1', 'ended']])
+  })
+})
+
+describe('startLifecycleScheduler — group C2b (exhaustion sweep)', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('dead-letters and marks delivered an exhausted claim, without re-driving it', async () => {
+    vi.setSystemTime(new Date('2026-07-15T00:10:00Z'))
+    // No events in the feed: the transition scan (phase 1) and redelivery sweep (phase 2)
+    // have nothing to claim/re-drive, isolating this assertion to the exhaustion sweep.
+    const configStore = makeConfigStore({ allTimedEvents: [] })
+    const { deliveryStore, deadLetters } = makeDeliveryStore()
+    const marked: unknown[] = []
+    deliveryStore.markDelivered = async (projectId, eventId, transition) => { marked.push([projectId, eventId, transition]) }
+    deliveryStore.findExhaustedClaims = vi.fn()
+      .mockResolvedValueOnce([{ projectId: 'p1', eventId: 'e1', transition: 'live', attempts: 5 }])
+      .mockResolvedValue([])
+    const dispatcher = fakeDispatcher()
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(dispatcher.deliverTransition).not.toHaveBeenCalled()
+    expect(deadLetters).toHaveLength(1)
+    expect(deadLetters[0]).toMatchObject({ projectId: 'p1', url: '<exhausted>', error: 'redelivery attempts exhausted' })
+    expect(JSON.parse(deadLetters[0].payload)).toEqual({ projectId: 'p1', eventId: 'e1', transition: 'live', attempts: 5 })
+    expect(marked).toEqual([['p1', 'e1', 'live']])
+  })
+
+  it('calls findExhaustedClaims with MAX_REDELIVERY_ATTEMPTS (5)', async () => {
+    vi.setSystemTime(new Date('2026-07-15T00:10:00Z'))
+    const configStore = makeConfigStore()
+    const { deliveryStore } = makeDeliveryStore()
+    const findExhaustedClaims = vi.fn().mockResolvedValue([])
+    deliveryStore.findExhaustedClaims = findExhaustedClaims
+    const dispatcher = fakeDispatcher()
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(findExhaustedClaims).toHaveBeenCalledWith(5)
+  })
+
+  it('a per-claim failure while dead-lettering an exhausted claim does not stop the sweep from continuing', async () => {
+    vi.setSystemTime(new Date('2026-07-15T00:10:00Z'))
+    const configStore = makeConfigStore()
+    const { deliveryStore } = makeDeliveryStore()
+    const marked: unknown[] = []
+    deliveryStore.markDelivered = async (projectId, eventId, transition) => { marked.push([projectId, eventId, transition]) }
+    let call = 0
+    deliveryStore.recordDeadLetter = async () => { call++; if (call === 1) throw new Error('db down') }
+    deliveryStore.findExhaustedClaims = vi.fn().mockResolvedValueOnce([
+      { projectId: 'p1', eventId: 'e-fail', transition: 'live', attempts: 5 },
+      { projectId: 'p1', eventId: 'e-ok', transition: 'live', attempts: 5 },
+    ]).mockResolvedValue([])
+    const dispatcher = fakeDispatcher()
+    const testLogger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000, logger: testLogger })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    // the failing claim is not marked delivered, but the second claim still is
+    expect(marked).toEqual([['p1', 'e-ok', 'live']])
+    expect(testLogger.error).toHaveBeenCalled()
   })
 })
 

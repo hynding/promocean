@@ -90,6 +90,36 @@ describe('PgWebhookDeliveryStore', () => {
     const staleForScope = staleClaims.filter((c) => c.projectId === 'p-sc')
     expect(staleForScope).toEqual([{ projectId: 'p-sc', eventId: 'stale', transition: 'live', attempts: 1 }])
   })
+
+  it('findExhaustedClaims returns only undelivered rows at or above minAttempts', async () => {
+    const store = new PgWebhookDeliveryStore(db)
+    const old = new Date(Date.now() - 60 * 60 * 1000)
+
+    // below cap: undelivered, attempts < minAttempts -> excluded
+    await db.$client.query(
+      `insert into runtime.timed_event_notifications (project_id, event_id, transition, fired_at, delivered_at, attempts) values ('p-ec','below-cap','live',$1,null,4)`,
+      [old],
+    )
+    // delivered: attempts >= minAttempts but delivered -> excluded
+    await db.$client.query(
+      `insert into runtime.timed_event_notifications (project_id, event_id, transition, fired_at, delivered_at, attempts) values ('p-ec','delivered','live',$1,now(),5)`,
+      [old],
+    )
+    // exhausted: undelivered, attempts >= minAttempts -> included
+    await db.$client.query(
+      `insert into runtime.timed_event_notifications (project_id, event_id, transition, fired_at, delivered_at, attempts) values ('p-ec','exhausted','live',$1,null,5)`,
+      [old],
+    )
+    // over cap: undelivered, attempts > minAttempts -> included
+    await db.$client.query(
+      `insert into runtime.timed_event_notifications (project_id, event_id, transition, fired_at, delivered_at, attempts) values ('p-ec','over-cap','live',$1,null,7)`,
+      [old],
+    )
+
+    const exhaustedClaims = await store.findExhaustedClaims(5)
+    const exhaustedForScope = exhaustedClaims.filter((c) => c.projectId === 'p-ec')
+    expect(exhaustedForScope.map((c) => c.eventId).sort()).toEqual(['exhausted', 'over-cap'])
+  })
 })
 
 describe('PgWebhookDeliveryStore dead-letter retention', () => {
@@ -108,5 +138,43 @@ describe('PgWebhookDeliveryStore dead-letter retention', () => {
 
     const { rows } = await db.$client.query(`select url from runtime.webhook_dead_letters where project_id='p-dl'`)
     expect(rows).toEqual([{ url: 'https://x.test/recent' }])
+  })
+})
+
+describe('migration 0005 — delivered_at backfill', () => {
+  it('backfills delivered_at to fired_at for claims left null by pre-0004 data, and leaves delivered rows untouched', async () => {
+    const store = new PgWebhookDeliveryStore(db)
+    const firedAt = new Date(Date.now() - 60 * 60 * 1000)
+
+    // Simulates a claim made before migration 0004 introduced delivered_at: null it out
+    // via raw SQL exactly as it would appear on an existing database pre-upgrade.
+    await store.claimTransition('p-bf', 'e-null', 'live')
+    await db.$client.query(
+      `update runtime.timed_event_notifications set fired_at = $1, delivered_at = null where project_id='p-bf' and event_id='e-null' and transition='live'`,
+      [firedAt],
+    )
+
+    // An already-delivered row must be untouched by the backfill.
+    await store.claimTransition('p-bf', 'e-delivered', 'live')
+    await store.markDelivered('p-bf', 'e-delivered', 'live')
+    const { rows: beforeRows } = await db.$client.query(
+      `select delivered_at from runtime.timed_event_notifications where project_id='p-bf' and event_id='e-delivered' and transition='live'`,
+    )
+    const deliveredAtBefore = beforeRows[0].delivered_at
+
+    // Execute the 0005 migration's UPDATE statement raw (mirrors migrations/0005_backfill_delivered_at.sql).
+    await db.$client.query(
+      `UPDATE "runtime"."timed_event_notifications" SET "delivered_at" = "fired_at" WHERE "delivered_at" IS NULL`,
+    )
+
+    const { rows: nullRows } = await db.$client.query(
+      `select fired_at, delivered_at from runtime.timed_event_notifications where project_id='p-bf' and event_id='e-null' and transition='live'`,
+    )
+    expect(nullRows[0].delivered_at.getTime()).toBe(nullRows[0].fired_at.getTime())
+
+    const { rows: deliveredRows } = await db.$client.query(
+      `select delivered_at from runtime.timed_event_notifications where project_id='p-bf' and event_id='e-delivered' and transition='live'`,
+    )
+    expect(deliveredRows[0].delivered_at.getTime()).toBe(deliveredAtBefore.getTime())
   })
 })

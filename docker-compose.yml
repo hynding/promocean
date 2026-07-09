@@ -50,7 +50,7 @@ services:
       ADMIN_FIRST_NAME: ${ADMIN_FIRST_NAME:-Admin}
       ADMIN_LAST_NAME: ${ADMIN_LAST_NAME:-User}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeMe123!}
 
   # -------------------------------------------------------------------------
   # api (Hono) — runs drizzle migrations at boot. Waits for postgres healthy

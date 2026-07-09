@@ -2,19 +2,20 @@ import { serve } from '@hono/node-server'
 import { createDb, runMigrations, PgErasureStore, PgIngestionStore, PgOfferMetricsStore, PgProgressStore, PgStatsStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
 import { StrapiConfigPlane } from '@promocean/adapter-strapi'
 import { createApp } from './app.js'
+import { envInt } from './env.js'
 import { logger } from './logger.js'
 import { installShutdownHandlers } from './shutdown.js'
 import { WebhookDispatcher, resolveScanGraceMinutes, startLifecycleScheduler } from './webhooks.js'
 
 const db = createDb(process.env.DATABASE_URL!)
 await runMigrations(db)
-const redeliveryGraceMinutes = Number(process.env.WEBHOOK_REDELIVERY_GRACE_MINUTES ?? 5)
+const redeliveryGraceMinutes = envInt('WEBHOOK_REDELIVERY_GRACE_MINUTES', 5)
 // Single-sourced (Sprint 6 Task 4 review fix): compute the effective scan-grace window once
 // and hand it to BOTH the config-plane feed and the lifecycle scheduler, so they always agree
 // on how far back "ended" events are still considered in scope. The scheduler's own clamp is
 // kept as a backstop but is a no-op given an already-resolved value.
 const scanGraceMinutes = resolveScanGraceMinutes(
-  Number(process.env.TIMED_EVENT_SCAN_GRACE_MINUTES ?? 60),
+  envInt('TIMED_EVENT_SCAN_GRACE_MINUTES', 60),
   redeliveryGraceMinutes,
   logger,
 )
@@ -31,7 +32,7 @@ const stopScheduler = startLifecycleScheduler({
   dispatcher: webhooks,
   redeliveryGraceMinutes,
   scanGraceMinutes,
-  deadLetterTtlDays: Number(process.env.WEBHOOK_DEAD_LETTER_TTL_DAYS ?? 30),
+  deadLetterTtlDays: envInt('WEBHOOK_DEAD_LETTER_TTL_DAYS', 30),
 })
 const app = createApp({
   configStore: plane,
@@ -50,7 +51,7 @@ const app = createApp({
     checkConfigPlane: async () => { await plane.getAllTimedEvents() },
   },
 })
-const port = Number(process.env.API_PORT ?? 3001)
+const port = envInt('API_PORT', 3001)
 const server = serve({ fetch: app.fetch, port })
 logger.info({ port }, 'promocean api listening')
 
