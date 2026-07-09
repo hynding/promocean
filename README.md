@@ -26,9 +26,12 @@ This builds and boots Postgres, the Strapi CMS, the API, and the demo app
 seeds a demo project with test API keys. Once it's up:
 
 - `http://localhost:3002/?user=manual-1` — the demo app; click **Complete a
-  lesson** to see an achievement unlock live.
+  lesson** to see an achievement unlock live, then use the **Rewards store**
+  section to claim the free `WELCOME10` coupon or (once you've earned 100+
+  points) the generated-code `Demo Discount` reward.
 - `http://localhost:3002/stats` — server-rendered aggregate stats for
-  everything you just did.
+  everything you just did, plus a coupon-check form (validate/redeem a
+  claimed code with the secret key, server-side).
 - `http://localhost:1337/admin` — the Strapi CMS admin (log in with the
   `ADMIN_EMAIL`/`ADMIN_PASSWORD` from your `.env`).
 - `http://localhost:3001/v1/openapi.json` — the API's OpenAPI document.
@@ -98,8 +101,13 @@ that the resulting event/unlock counts show up live on `/stats`;
 `offer-loop.spec.ts` proves an offer renders, fires exactly one impression
 beacon, dismisses, and — after a reload — neither re-renders nor fires
 another impression beacon; `timed-event-loop.spec.ts` proves the live-event
-countdown and progress multiplier. With cms + api already running (per
-above):
+countdown and progress multiplier; `engagement-loop.spec.ts` proves the
+wallet/streak readouts and leaderboard row; `rewards-loop.spec.ts` proves
+the full earn/burn loop — claiming a free static-code reward, being blocked
+on a priced reward by insufficient points, earning enough to claim it
+(generated code, balance debited), the `/stats` page's coupon
+validate/redeem/re-redeem-409 flow, and that erasure counts the claimed
+coupons. With cms + api already running (per above):
 
     pnpm --filter demo exec playwright install chromium
     pnpm --filter demo e2e
@@ -127,6 +135,10 @@ middleware so tooling can fetch the spec without a key.
 | GET | `/v1/users/:userId/wallet` | pk or sk | Fetch a user's points wallet: running balance plus a short recent ledger of event-rule and achievement-unlock-bonus awards. |
 | GET | `/v1/users/:userId/streak` | pk or sk | Fetch a user's current/longest daily activity streak and last active (client-local) day. |
 | GET | `/v1/leaderboard` | pk or sk | Rank users in a project by total points. Optional `?window=all\|7d\|30d` (default `all`) and `?limit=` (default 10, max 100). See the privacy note below. |
+| GET | `/v1/rewards` | pk or sk | List enabled, in-window rewards available to claim (name, description, points price, claim window, per-user limit, remaining inventory). Never includes a static reward's `staticCode` — see the privacy note below. |
+| POST | `/v1/rewards/:slug/claim` | pk or sk | Claim a reward for a user, returning its coupon code. Rejected with `404 not_found` for an unknown slug, or `409` `reward_unavailable` / `claim_limit_reached` / `insufficient_points` when the reward, per-user limit, or points balance rules aren't met. |
+| POST | `/v1/coupons/validate` | sk only | Look up a coupon code without redeeming it: `{ valid, rewardSlug?, status?, reason? }`. Rejected with `403 forbidden` for publishable keys. |
+| POST | `/v1/coupons/redeem` | sk only | Redeem a coupon code (one-time). Rejected with `409 already_redeemed` on a second redemption, `409 reward_unavailable` if the reward has since expired, or `404 not_found` for an unknown code. Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
 | GET | `/docs` | none | Serve an HTML API reference (Redoc) rendered from the same OpenAPI document. |
@@ -144,9 +156,10 @@ keys, and requests with no `Origin` header, are exempt from this check).
 
 ### Data retention
 
-`DELETE /v1/users/:userId` erases a user's events, progress, unlocks, and
-offer_events rows in one transaction, but **MAU (monthly active user)
-counter rows are retained** — they exist for usage-based billing history and
+`DELETE /v1/users/:userId` erases a user's events, progress, unlocks,
+offer_events, points_ledger, streaks, and coupons (claimed and redeemed
+alike) rows in one transaction, but **MAU (monthly active user) counter
+rows are retained** — they exist for usage-based billing history and
 contain only the project/environment/month and the external user id, no
 event content.
 
@@ -204,6 +217,75 @@ non-numeric, or otherwise invalid, the event's local day is computed as if
 the offset were `0` — i.e. it falls back to the UTC calendar day rather than
 failing the request. (A numeric offset outside the real-world range of
 ±840 minutes / UTC-14..UTC+14 is clamped to the nearest bound instead.)
+
+### Rewards & coupons
+
+A project's rewards are points-redeemable coupons configured in the CMS:
+`GET /v1/rewards` lists what's currently claimable (enabled + inside its
+optional `startsAt`/`endsAt` window), and `POST /v1/rewards/:slug/claim`
+claims one for a user, debiting `pointsPrice` from their wallet (as a
+`redemption`-sourced points-ledger entry — see the SDK's wallet note below)
+in the same transaction the coupon row is written. A reward is either
+**generated** (a fresh, unique code like `DEMO-7F3KQPZ2XN` minted per claim
+from a 32-character, ambiguity-free alphabet — no `0`/`O`/`1`/`I`) or
+**static** (every claim shares one configured code, e.g. `WELCOME10`).
+Claim eligibility is enforced under a per-reward-then-per-user advisory lock
+pair (deadlock-free, fixed order) so two concurrent claims can never
+overspend a shared inventory cap or a user's points balance: unavailable
+rewards (disabled, out of window, sold out) and limit/balance violations
+both come back as `409` (`reward_unavailable`, `claim_limit_reached`,
+`insufficient_points`); an unknown reward slug is `404 not_found`. Setting a
+reward's `enabled` to `false` only blocks **new claims** — coupons already
+claimed remain fully redeemable, since expiry is evaluated separately (see
+below); to also stop redemption of outstanding codes, set `endsAt` in the
+past instead of (or in addition to) disabling the reward.
+
+Once claimed, a code is checked and consumed with the **secret-key-only**
+`POST /v1/coupons/validate` (read-only — reports `valid: true` with `status:
+'claimed'`, or `valid: false` with `reason: 'not_found' | 'already_redeemed'
+| 'expired'`) and `POST /v1/coupons/redeem` (one-time; a second redeem
+attempt on the same code is rejected with `409 already_redeemed`). Both
+endpoints require a secret key precisely because they let the caller
+enumerate whether/how an arbitrary code resolves — a browser-exposed
+publishable key must never be able to do that.
+
+**Claim privacy/abuse note:** `POST /v1/rewards/:slug/claim` is pk-accessible
+by design (like `track()`/`identify()`) and claims on behalf of whatever
+`userId` the caller passes — anyone holding a publishable key can claim a
+reward as any `userId`, including debiting that user's points balance for a
+priced reward. This is the same trust model as event tracking: a
+publishable key is meant to be embedded in a browser/client, so it can't be
+kept secret from the end user, and Promocean doesn't independently verify
+that the caller *is* the `userId` it claims to act as — that verification is
+the host app's responsibility (e.g. only calling claim from your own
+authenticated backend, or otherwise binding `userId` to a verified session)
+if claim-spoofing across users is a concern for your use case.
+
+**Static-code oldest-first semantics:** every claim of a static reward
+inserts its own coupon row sharing the same code string, so many users can
+each hold "their" claim of e.g. `WELCOME10` at once. Redemption doesn't
+care which claim a caller "means" — it locks and redeems whichever
+still-claimed row for that code was claimed longest ago (oldest-first,
+`FOR UPDATE SKIP LOCKED` so concurrent redeemers never block on or double-redeem
+the same row), so a shared code's redemption count simply tracks through
+its outstanding claims in claim order.
+
+**Expiry is evaluated at redemption, not at claim time:** a reward's
+`endsAt` only gates *claiming* a new coupon — a code claimed while the
+reward was still live remains a valid, redeemable coupon even after
+`endsAt` passes, **except** validate/redeem re-check the reward's live
+window at request time and reject with `reward_unavailable` (redeem) /
+`reason: 'expired'` (validate) if it's since ended. In other words: earning
+a coupon locks in eligibility to redeem it later, but "later" still has to
+be before the reward itself expires.
+
+**staticCode is never exposed via the catalog:** `GET /v1/rewards`'
+response schema has no `staticCode` field at all (not merely omitted when
+empty) — even for a static reward, the only way to learn its code is to
+actually claim it (or, for callers with a secret key, resolve an already-known
+code via validate/redeem). This is deliberate: the catalog is safe to expose
+to a publishable key/browser context without leaking a shared promo code to
+anyone who hasn't earned it.
 
 ## Webhooks
 

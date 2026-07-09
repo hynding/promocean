@@ -6,6 +6,7 @@ import type {
   ConfigStore,
   OfferDefinition,
   PointRules,
+  RewardDefinition,
   TimedEventDefinition,
   WebhookEndpointDefinition,
 } from '@promocean/core'
@@ -16,6 +17,7 @@ import {
   eventTypesResponseSchema,
   offersResponseSchema,
   pointRulesResponseSchema,
+  rewardsResponseSchema,
   timedEventsResponseSchema,
   verifyKeyResponseSchema,
   webhookEndpointsResponseSchema,
@@ -63,6 +65,7 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   private webhookEndpointsCache = new Map<string, CacheEntry<WebhookEndpointDefinition[]>>()
   private eventTypesCache = new Map<string, CacheEntry<string[]>>()
   private pointRulesCache = new Map<string, CacheEntry<PointRules>>()
+  private rewardsCache = new Map<string, CacheEntry<RewardDefinition[]>>()
 
   constructor(private opts: StrapiConfigPlaneOptions) {
     this.ttl = opts.cacheTtlMs ?? 30_000
@@ -269,6 +272,39 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
       }
       this.pointRulesCache.set(projectId, { value: pointRules, expires: Date.now() + this.ttl })
       return pointRules
+    } catch (err) {
+      if (cached) return cached.value
+      throw err
+    }
+  }
+
+  async getRewards(projectId: string): Promise<RewardDefinition[]> {
+    const cached = this.rewardsCache.get(projectId)
+    if (cached && cached.expires > Date.now()) return cached.value
+    try {
+      const res = await this.fetchImpl(
+        `${this.opts.baseUrl}/api/config-plane/rewards?projectId=${encodeURIComponent(projectId)}`,
+        { headers: this.headers() },
+      )
+      if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+      const body = parseOrThrow(rewardsResponseSchema, await res.json())
+      const rewards: RewardDefinition[] = body.rewards.map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        name: r.name,
+        description: r.description,
+        codeType: r.codeType,
+        staticCode: r.staticCode,
+        codePrefix: r.codePrefix,
+        pointsPrice: r.pointsPrice,
+        startsAt: r.startsAt ? new Date(r.startsAt) : null,
+        endsAt: r.endsAt ? new Date(r.endsAt) : null,
+        perUserLimit: r.perUserLimit,
+        inventory: r.inventory,
+        enabled: r.enabled,
+      }))
+      this.rewardsCache.set(projectId, { value: rewards, expires: Date.now() + this.ttl })
+      return rewards
     } catch (err) {
       if (cached) return cached.value
       throw err

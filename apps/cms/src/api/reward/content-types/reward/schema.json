@@ -1,0 +1,21 @@
+{
+  "kind": "collectionType",
+  "collectionName": "rewards",
+  "info": { "singularName": "reward", "pluralName": "rewards", "displayName": "Reward" },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "slug": { "type": "string", "required": true, "regex": "^[a-z][a-z0-9_-]*$" },
+    "description": { "type": "text" },
+    "enabled": { "type": "boolean", "default": true, "required": true },
+    "codeType": { "type": "enumeration", "enum": ["generated", "static"], "required": true, "default": "generated" },
+    "staticCode": { "type": "string" },
+    "codePrefix": { "type": "string" },
+    "pointsPrice": { "type": "integer", "min": 0, "default": 0, "required": true },
+    "startsAt": { "type": "datetime" },
+    "endsAt": { "type": "datetime" },
+    "perUserLimit": { "type": "integer", "min": 1, "default": 1, "required": true },
+    "inventory": { "type": "integer", "min": 1 },
+    "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
+  }
+}

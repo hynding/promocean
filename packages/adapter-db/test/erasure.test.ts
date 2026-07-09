@@ -46,6 +46,10 @@ beforeAll(async () => {
         `insert into runtime.user_streaks (project_id, environment, user_id, current_streak, longest_streak, last_active_day) values ($1,$2,$3,$4,$5,$6)`,
         [s.projectId, s.environment, userId, 1, 1, '2026-07-06'],
       )
+      await db.$client.query(
+        `insert into runtime.coupons (project_id, environment, reward_id, user_id, code, code_shared, status) values ($1,$2,$3,$4,$5,$6,$7)`,
+        [s.projectId, s.environment, 'rw1', userId, `code-${s.projectId}-${userId}`, false, 'claimed'],
+      )
     }
   }
 })
@@ -55,7 +59,7 @@ describe('PgErasureStore', () => {
   it('erases a single user within a scope transactionally, leaving other users, other tenants, and MAU rows intact', async () => {
     const store = new PgErasureStore(db)
     const counts = await store.eraseUser(scope, 'u1')
-    expect(counts).toEqual({ events: 1, progress: 1, unlocks: 1, offerEvents: 1, pointsLedger: 1, streaks: 1 })
+    expect(counts).toEqual({ events: 1, progress: 1, unlocks: 1, offerEvents: 1, pointsLedger: 1, streaks: 1, coupons: 1 })
 
     const countRows = async (table: string, projectId: string, userId: string) => {
       const { rows } = await db.$client.query(
@@ -72,6 +76,7 @@ describe('PgErasureStore', () => {
     expect(await countRows('offer_events', 'p1', 'u1')).toBe(0)
     expect(await countRows('points_ledger', 'p1', 'u1')).toBe(0)
     expect(await countRows('user_streaks', 'p1', 'u1')).toBe(0)
+    expect(await countRows('coupons', 'p1', 'u1')).toBe(0)
 
     // u2 in p1/test survives.
     expect(await countRows('events', 'p1', 'u2')).toBe(1)
@@ -80,6 +85,7 @@ describe('PgErasureStore', () => {
     expect(await countRows('offer_events', 'p1', 'u2')).toBe(1)
     expect(await countRows('points_ledger', 'p1', 'u2')).toBe(1)
     expect(await countRows('user_streaks', 'p1', 'u2')).toBe(1)
+    expect(await countRows('coupons', 'p1', 'u2')).toBe(1)
 
     // u1 in p2/test (other tenant) survives.
     expect(await countRows('events', 'p2', 'u1')).toBe(1)
@@ -88,6 +94,7 @@ describe('PgErasureStore', () => {
     expect(await countRows('offer_events', 'p2', 'u1')).toBe(1)
     expect(await countRows('points_ledger', 'p2', 'u1')).toBe(1)
     expect(await countRows('user_streaks', 'p2', 'u1')).toBe(1)
+    expect(await countRows('coupons', 'p2', 'u1')).toBe(1)
 
     // MAU rows are deliberately not touched by erasure.
     expect(await countRows('monthly_active_users', 'p1', 'u1')).toBe(1)

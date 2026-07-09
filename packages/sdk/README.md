@@ -59,6 +59,14 @@ promocean.isOfferDismissed(offer.offerId) // true
 
 // Get currently scheduled/live/ending-soon timed events (progress multipliers).
 const liveEvents = await promocean.getLiveEvents()
+
+// List rewards currently claimable, then claim one for the identified user.
+const rewards = await promocean.listRewards()
+const { code, pointsSpent } = await promocean.claimReward(rewards[0].slug)
+
+// Server-side only (secretKey): look up and redeem a coupon code.
+const check = await promocean.validateCoupon(code)   // { valid, rewardSlug?, status?, reason? }
+await promocean.redeemCoupon(code)                    // { redeemed: true, rewardSlug, redeemedAt }
 ```
 
 ### `new Promocean(options)`
@@ -135,6 +143,44 @@ handler, a backend service) — never in code that ships to or runs in a
 browser. Calling `getStats()` without a configured `secretKey` throws
 immediately rather than attempting the request.
 
+### Rewards & coupons
+
+```ts
+promocean.listRewards(): Promise<Reward[]>
+// [{ slug, name, description, codeType, pointsPrice, startsAt, endsAt, perUserLimit, inventory, remaining }]
+// codeType is 'generated' | 'static' — the static reward's own code (staticCode) is never
+// included here; the only way to learn it is to claim it.
+
+promocean.claimReward(slug: string): Promise<ClaimRewardResponse>
+// { code, rewardSlug, claimedAt, pointsSpent } — reads the identified user (identify() first).
+// Throws PromoceanApiError with code 'reward_unavailable' | 'claim_limit_reached' |
+// 'insufficient_points' (all 409) when the reward, per-user limit, or points balance rules
+// aren't met, or 'not_found' (404) for an unknown slug.
+```
+
+`validateCoupon(code)` and `redeemCoupon(code)` are **server-side only** —
+same `secretKey` posture as `getStats()` above, and throw immediately if
+`secretKey` isn't configured:
+
+```ts
+promocean.validateCoupon(code: string): Promise<ValidateCouponResponse>
+// { valid, rewardSlug?, status?: 'claimed' | 'redeemed', reason?: 'not_found' | 'already_redeemed' | 'expired' }
+// Read-only — never mutates the coupon's status.
+
+promocean.redeemCoupon(code: string): Promise<RedeemCouponResponse>
+// { redeemed: true, rewardSlug, redeemedAt } on success.
+// Throws PromoceanApiError with code 'already_redeemed' (409) on a repeat redemption of the
+// same code, 'reward_unavailable' (409) if the reward has since expired, or 'not_found' (404)
+// for an unknown code.
+```
+
+**Wallet note:** `getWallet()`'s `recent[].source` can be `'redemption'`
+(a claim's points debit) in addition to `'event'`/`'unlock'` — code built
+against an older `@promocean/contracts`/`@promocean/sdk` that doesn't know
+this source value will fail zod-parsing a wallet response once any
+redemption exists in your project. Upgrade both packages together before
+spending/rewards go live.
+
 ### Listening for unlocks
 
 ```ts
@@ -190,6 +236,7 @@ misconfigured or compromised CMS content.
 
 Request/response shapes (`TrackEventResponse`, `AchievementStatus`,
 `OfferCreative`, `UnlockPayload`, `LiveTimedEvent`, `WalletResponse`,
-`StreakResponse`, `LeaderboardResponse`, etc.) are re-exported
+`StreakResponse`, `LeaderboardResponse`, `Reward`, `ClaimRewardResponse`,
+`ValidateCouponResponse`, `RedeemCouponResponse`, etc.) are re-exported
 from `@promocean/contracts` and validated at runtime with zod — a malformed
 API response throws rather than silently returning bad data.

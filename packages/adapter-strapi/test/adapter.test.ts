@@ -416,3 +416,71 @@ describe('StrapiConfigPlane.getPointRules', () => {
     expect(pointRules).toEqual({ lesson_completed: 10, zero: 0 })
   })
 })
+
+const rewardsBody = {
+  rewards: [
+    {
+      id: 'r1', slug: 'free-coffee', name: 'Free Coffee', description: 'On the house',
+      codeType: 'generated', staticCode: null, codePrefix: 'COFFEE',
+      pointsPrice: 100, startsAt: '2026-07-01T00:00:00.000Z', endsAt: null,
+      perUserLimit: 1, inventory: 50, enabled: true,
+    },
+    {
+      id: 'r2', slug: 'welcome-discount', name: 'Welcome Discount', description: null,
+      codeType: 'static', staticCode: 'WELCOME10', codePrefix: null,
+      pointsPrice: 0, startsAt: null, endsAt: null,
+      perUserLimit: 1, inventory: null, enabled: true,
+    },
+  ],
+}
+
+describe('StrapiConfigPlane.getRewards', () => {
+  it('fetches the correct URL and maps both codeTypes with dates', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(rewardsBody))
+    const rewards = await makePlane(fetchImpl).getRewards('p1')
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://cms.test/api/config-plane/rewards?projectId=p1')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://cms.test/api/config-plane/rewards?projectId=p1')
+    expect(init.headers['x-config-secret']).toBe('s3cret')
+
+    expect(rewards[0]).toMatchObject({
+      id: 'r1', slug: 'free-coffee', name: 'Free Coffee', description: 'On the house',
+      codeType: 'generated', staticCode: null, codePrefix: 'COFFEE',
+      pointsPrice: 100, endsAt: null, perUserLimit: 1, inventory: 50, enabled: true,
+    })
+    expect(rewards[0].startsAt).toEqual(new Date('2026-07-01T00:00:00.000Z'))
+
+    expect(rewards[1]).toMatchObject({
+      id: 'r2', slug: 'welcome-discount', codeType: 'static', staticCode: 'WELCOME10',
+      codePrefix: null, pointsPrice: 0, perUserLimit: 1, inventory: null, enabled: true,
+    })
+    expect(rewards[1].startsAt).toBeNull()
+    expect(rewards[1].endsAt).toBeNull()
+  })
+  it('carries the staticCode through for a static reward', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(rewardsBody))
+    const rewards = await makePlane(fetchImpl).getRewards('p1')
+    const staticReward = rewards.find((r) => r.codeType === 'static')
+    expect(staticReward?.staticCode).toBe('WELCOME10')
+  })
+  it('caches within TTL (one fetch for two calls)', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(rewardsBody))
+    const plane = makePlane(fetchImpl)
+    await plane.getRewards('p1')
+    await plane.getRewards('p1')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+  it('serves stale cache when a malformed body fails validation after expiry', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(rewardsBody))
+      .mockImplementation(() => ok({ rewards: [{ id: 'r1' }] }))
+    const plane = makePlane(fetchImpl, 0) // TTL 0: always expired
+    await plane.getRewards('p1')
+    const rewards = await plane.getRewards('p1')
+    expect(rewards.map((r) => r.id)).toEqual(['r1', 'r2'])
+  })
+  it('throws on a malformed body with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => ok({ rewards: [{ id: 'r1' }] })))
+    await expect(plane.getRewards('p1')).rejects.toThrow()
+  })
+})

@@ -632,6 +632,72 @@ export interface ApiProjectProject extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiRewardReward extends Struct.CollectionTypeSchema {
+  collectionName: 'rewards';
+  info: {
+    displayName: 'Reward';
+    pluralName: 'rewards';
+    singularName: 'reward';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    codePrefix: Schema.Attribute.String;
+    codeType: Schema.Attribute.Enumeration<['generated', 'static']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'generated'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.Text;
+    enabled: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    endsAt: Schema.Attribute.DateTime;
+    inventory: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 1;
+        },
+        number
+      >;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::reward.reward'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    perUserLimit: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 1;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<1>;
+    pointsPrice: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 0;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<0>;
+    project: Schema.Attribute.Relation<'manyToOne', 'api::project.project'>;
+    publishedAt: Schema.Attribute.DateTime;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
+    startsAt: Schema.Attribute.DateTime;
+    staticCode: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiTimedEventTimedEvent extends Struct.CollectionTypeSchema {
   collectionName: 'timed_events';
   info: {
@@ -1236,6 +1302,7 @@ declare module '@strapi/strapi' {
       'api::offer.offer': ApiOfferOffer;
       'api::placement.placement': ApiPlacementPlacement;
       'api::project.project': ApiProjectProject;
+      'api::reward.reward': ApiRewardReward;
       'api::timed-event.timed-event': ApiTimedEventTimedEvent;
       'api::webhook-endpoint.webhook-endpoint': ApiWebhookEndpointWebhookEndpoint;
       'plugin::content-releases.release': PluginContentReleasesRelease;

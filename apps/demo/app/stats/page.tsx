@@ -1,4 +1,5 @@
 import { Promocean } from '@promocean/sdk'
+import { CouponCheckForm } from './coupon-check-form'
 
 // Server component only: reads process.env.PROMOCEAN_SECRET_KEY (never
 // NEXT_PUBLIC_*, which would ship the secret key to the browser bundle).
@@ -89,6 +90,8 @@ export default async function StatsPage() {
           </tbody>
         </table>
       </section>
+
+      <CouponCheckForm />
     </main>
   )
 }

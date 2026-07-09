@@ -1,8 +1,9 @@
 import { StrictMode } from 'react'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { UnlockPayload } from '@promocean/contracts'
-import { BadgeCabinet, EventCountdown, Leaderboard, Placement, PromoceanProvider, UnlockToast } from '../src/index.js'
+import type { Reward, UnlockPayload } from '@promocean/contracts'
+import { PromoceanApiError } from '@promocean/sdk'
+import { BadgeCabinet, EventCountdown, Leaderboard, Placement, PromoceanProvider, RewardsStore, UnlockToast } from '../src/index.js'
 
 // RTL's automatic afterEach cleanup only registers when `afterEach` exists as a
 // global; this project's vitest config doesn't set `test.globals: true`, so
@@ -23,6 +24,9 @@ function fakeClient(achievements: unknown[] = [], offer: unknown = null) {
       dismissOffer: vi.fn(),
       isOfferDismissed: vi.fn().mockReturnValue(false),
       getLeaderboard: vi.fn().mockResolvedValue({ window: 'all', entries: [] }),
+      listRewards: vi.fn().mockResolvedValue([]),
+      getWallet: vi.fn().mockResolvedValue({ balance: 0, recent: [] }),
+      claimReward: vi.fn().mockResolvedValue({ code: 'CODE-1', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 0 }),
       currentUserId: undefined as string | undefined,
     } as any,
     emit: (u: UnlockPayload) => listeners.forEach((cb) => cb(u)),
@@ -290,6 +294,155 @@ describe('Leaderboard', () => {
     const { unmount } = render(<PromoceanProvider client={client}><Leaderboard /></PromoceanProvider>)
     unmount()
     await act(async () => { resolveLeaderboard({ window: 'all', entries }) })
+    expect(consoleError).not.toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+})
+
+describe('RewardsStore', () => {
+  function reward(overrides: Partial<Reward> = {}): Reward {
+    return {
+      slug: 'r1', name: 'Sticker Pack', description: 'A pack of stickers.',
+      codeType: 'generated', pointsPrice: 100,
+      startsAt: null, endsAt: null, perUserLimit: 1, inventory: null, remaining: null,
+      ...overrides,
+    }
+  }
+
+  it('renders rows and balance from the fake client', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward(), reward({ slug: 'r2', name: 'Free Trial', pointsPrice: 0 })])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    const { container } = render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    expect(screen.getByText('Free Trial')).toBeDefined()
+    expect(screen.getByText('250')).toBeDefined()
+    expect(container.querySelector('[data-promocean-rewards]')).not.toBeNull()
+  })
+
+  it('renders nothing when unidentified', async () => {
+    const { client } = fakeClient()
+    const { container } = render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    expect(container.querySelector('[data-promocean-rewards]')).toBeNull()
+    expect(client.listRewards).not.toHaveBeenCalled()
+    expect(client.getWallet).not.toHaveBeenCalled()
+  })
+
+  it('claiming a reward shows the code inline, keeps the claim button, and refetches wallet + rewards', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward({ perUserLimit: 5 })])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn().mockResolvedValue({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByText('ABC-123')).toBeDefined())
+    expect(client.claimReward).toHaveBeenCalledWith('r1')
+    expect(client.listRewards).toHaveBeenCalledTimes(2)
+    expect(client.getWallet).toHaveBeenCalledTimes(2)
+    // A reward with perUserLimit > 1 must still offer the claim button after
+    // a successful claim — the widget can't know the user's claim count, so
+    // it can't foreclose legitimate repeat claims itself.
+    expect(screen.getByRole('button', { name: 'Claim' })).not.toBeDisabled()
+  })
+
+  it('a repeat claim rejected as claim_limit_reached renders the mapped message while the prior code stays visible', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward({ perUserLimit: 5 })])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn()
+      .mockResolvedValueOnce({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
+      .mockRejectedValueOnce(new PromoceanApiError('claim_limit_reached', 'limit reached', 409))
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByText('ABC-123')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Claim limit reached'))
+    expect(screen.getByText('ABC-123')).toBeDefined()
+    expect(client.claimReward).toHaveBeenCalledTimes(2)
+  })
+
+  it('a second successful claim replaces the shown code with the new one', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward({ perUserLimit: 5 })])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn()
+      .mockResolvedValueOnce({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
+      .mockResolvedValueOnce({ code: 'DEF-456', rewardSlug: 'r1', claimedAt: '2026-07-06T00:05:00.000Z', pointsSpent: 100 })
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByText('ABC-123')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByText('DEF-456')).toBeDefined())
+    expect(screen.queryByText('ABC-123')).toBeNull()
+    expect(client.claimReward).toHaveBeenCalledTimes(2)
+  })
+
+  it('disables the claim button while a claim is pending, preventing a double-claim', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    let resolveClaim!: (v: unknown) => void
+    client.claimReward = vi.fn().mockReturnValue(new Promise((resolve) => { resolveClaim = resolve }))
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    const button = screen.getByRole('button', { name: 'Claim' })
+    act(() => { button.click() })
+    expect(screen.getByRole('button', { name: 'Claiming…' })).toBeDisabled()
+    act(() => { screen.getByRole('button', { name: 'Claiming…' }).click() })
+    expect(client.claimReward).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolveClaim({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
+    })
+    await waitFor(() => expect(screen.getByText('ABC-123')).toBeDefined())
+  })
+
+  it('renders the mapped message when claim fails with a PromoceanApiError', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn().mockRejectedValue(new PromoceanApiError('insufficient_points', 'not enough points', 409))
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Not enough points'))
+    expect(client.listRewards).toHaveBeenCalledTimes(1) // no refetch on failure
+  })
+
+  it('disables claim for insufficient balance and sold-out rewards', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([
+      reward({ slug: 'pricey', name: 'Pricey Reward', pointsPrice: 500 }),
+      reward({ slug: 'gone', name: 'Sold Out Reward', pointsPrice: 10, remaining: 0 }),
+    ])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 50, recent: [] })
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Pricey Reward')).toBeDefined())
+    const pricey = screen.getByRole('button', { name: 'Not enough points' })
+    expect(pricey).toBeDisabled()
+    const soldOut = screen.getByRole('button', { name: 'Sold out' })
+    expect(soldOut).toBeDisabled()
+  })
+
+  it('does not warn on state updates when unmounted before the fetch resolves', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    let resolveRewards!: (v: unknown) => void
+    client.listRewards = vi.fn().mockReturnValue(new Promise((resolve) => { resolveRewards = resolve }))
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 0, recent: [] })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { unmount } = render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    unmount()
+    await act(async () => { resolveRewards([reward()]) })
     expect(consoleError).not.toHaveBeenCalled()
     consoleError.mockRestore()
   })

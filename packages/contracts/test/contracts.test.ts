@@ -14,6 +14,15 @@ import {
   streakResponseSchema,
   leaderboardResponseSchema,
   leaderboardWindowSchema,
+  rewardSchema,
+  rewardsResponseSchema,
+  claimRewardRequestSchema,
+  claimRewardResponseSchema,
+  couponCodeSchema,
+  validateCouponRequestSchema,
+  validateCouponResponseSchema,
+  redeemCouponRequestSchema,
+  redeemCouponResponseSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -67,6 +76,7 @@ describe('eraseUserResponseSchema', () => {
         offerEvents: 3,
         pointsLedger: 7,
         streaks: 1,
+        coupons: 2,
       },
     }
     expect(eraseUserResponseSchema.parse(payload)).toEqual(payload)
@@ -74,6 +84,21 @@ describe('eraseUserResponseSchema', () => {
   it('rejects erased: false', () => {
     const result = eraseUserResponseSchema.safeParse({
       erased: false,
+      counts: {
+        events: 42,
+        progress: 10,
+        unlocks: 5,
+        offerEvents: 3,
+        pointsLedger: 7,
+        streaks: 1,
+        coupons: 2,
+      },
+    })
+    expect(result.success).toBe(false)
+  })
+  it('rejects counts without coupons', () => {
+    const result = eraseUserResponseSchema.safeParse({
+      erased: true,
       counts: {
         events: 42,
         progress: 10,
@@ -181,6 +206,12 @@ describe('error codes', () => {
     })
     expect(result.success).toBe(true)
   })
+  it('accepts the four new rewards/coupons error codes', () => {
+    for (const code of ['reward_unavailable', 'claim_limit_reached', 'insufficient_points', 'already_redeemed']) {
+      const result = errorEnvelopeSchema.safeParse({ error: { code, message: 'x' } })
+      expect(result.success).toBe(true)
+    }
+  })
 })
 
 describe('webhookMessageSchema', () => {
@@ -273,6 +304,16 @@ describe('walletResponseSchema', () => {
     const result = walletResponseSchema.safeParse(payload)
     expect(result.success).toBe(false)
   })
+  it('accepts a redemption entry', () => {
+    const payload = {
+      balance: 90,
+      recent: [
+        { delta: -10, source: 'redemption', sourceRef: 'ref3', at: '2026-07-08T12:00:00.000Z' },
+      ],
+    }
+    const result = walletResponseSchema.safeParse(payload)
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('streakResponseSchema', () => {
@@ -341,5 +382,146 @@ describe('leaderboardResponseSchema', () => {
     }
     const result = leaderboardResponseSchema.safeParse(payload)
     expect(result.success).toBe(false)
+  })
+})
+
+describe('rewardSchema', () => {
+  const validReward = {
+    slug: 'free-coffee',
+    name: 'Free Coffee',
+    description: 'A free coffee on us',
+    codeType: 'generated' as const,
+    pointsPrice: 100,
+    startsAt: '2026-07-01T00:00:00.000Z',
+    endsAt: '2026-08-01T00:00:00.000Z',
+    perUserLimit: 1,
+    inventory: 50,
+    remaining: 50,
+  }
+  it('round-trips a valid reward', () => {
+    expect(rewardSchema.parse(validReward)).toEqual(validReward)
+  })
+  it('accepts null description, startsAt, endsAt, inventory, remaining', () => {
+    const payload = {
+      ...validReward,
+      description: null,
+      startsAt: null,
+      endsAt: null,
+      inventory: null,
+      remaining: null,
+    }
+    expect(rewardSchema.safeParse(payload).success).toBe(true)
+  })
+  it('rejects pointsPrice of -1', () => {
+    expect(rewardSchema.safeParse({ ...validReward, pointsPrice: -1 }).success).toBe(false)
+  })
+  it('accepts pointsPrice of 0', () => {
+    expect(rewardSchema.safeParse({ ...validReward, pointsPrice: 0 }).success).toBe(true)
+  })
+  it('rejects perUserLimit of 0', () => {
+    expect(rewardSchema.safeParse({ ...validReward, perUserLimit: 0 }).success).toBe(false)
+  })
+  it('rejects inventory of 0', () => {
+    expect(rewardSchema.safeParse({ ...validReward, inventory: 0 }).success).toBe(false)
+  })
+  it('accepts inventory of null', () => {
+    expect(rewardSchema.safeParse({ ...validReward, inventory: null }).success).toBe(true)
+  })
+  it('does not allow a staticCode field to be part of the schema', () => {
+    expect('staticCode' in rewardSchema.shape).toBe(false)
+  })
+})
+
+describe('rewardsResponseSchema', () => {
+  it('round-trips a valid rewards response', () => {
+    const payload = {
+      rewards: [
+        {
+          slug: 'free-coffee',
+          name: 'Free Coffee',
+          description: null,
+          codeType: 'static' as const,
+          pointsPrice: 50,
+          startsAt: null,
+          endsAt: null,
+          perUserLimit: 1,
+          inventory: null,
+          remaining: null,
+        },
+      ],
+    }
+    expect(rewardsResponseSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('claimRewardRequestSchema', () => {
+  it('round-trips a valid claim request', () => {
+    const payload = { userId: 'user1' }
+    expect(claimRewardRequestSchema.parse(payload)).toEqual(payload)
+  })
+  it('rejects an empty userId', () => {
+    expect(claimRewardRequestSchema.safeParse({ userId: '' }).success).toBe(false)
+  })
+  it('rejects a userId over 128 chars', () => {
+    expect(claimRewardRequestSchema.safeParse({ userId: 'a'.repeat(129) }).success).toBe(false)
+  })
+})
+
+describe('claimRewardResponseSchema', () => {
+  it('round-trips a valid claim response', () => {
+    const payload = {
+      code: 'ABC123',
+      rewardSlug: 'free-coffee',
+      claimedAt: '2026-07-08T10:00:00.000Z',
+      pointsSpent: 100,
+    }
+    expect(claimRewardResponseSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('couponCodeSchema', () => {
+  it('rejects a code of length 0', () => {
+    expect(couponCodeSchema.safeParse('').success).toBe(false)
+  })
+  it('accepts a code of length 64', () => {
+    expect(couponCodeSchema.safeParse('a'.repeat(64)).success).toBe(true)
+  })
+  it('rejects a code of length 65', () => {
+    expect(couponCodeSchema.safeParse('a'.repeat(65)).success).toBe(false)
+  })
+})
+
+describe('validateCouponRequestSchema', () => {
+  it('round-trips a valid request', () => {
+    const payload = { code: 'ABC123' }
+    expect(validateCouponRequestSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('validateCouponResponseSchema', () => {
+  it('round-trips a valid coupon response', () => {
+    const payload = { valid: true, rewardSlug: 'free-coffee', status: 'claimed' as const }
+    expect(validateCouponResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('round-trips an invalid coupon response with a reason', () => {
+    const payload = { valid: false, reason: 'not_found' as const }
+    expect(validateCouponResponseSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('redeemCouponRequestSchema', () => {
+  it('round-trips a valid request', () => {
+    const payload = { code: 'ABC123' }
+    expect(redeemCouponRequestSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('redeemCouponResponseSchema', () => {
+  it('round-trips a valid redemption response', () => {
+    const payload = { redeemed: true as const, rewardSlug: 'free-coffee', redeemedAt: '2026-07-08T10:00:00.000Z' }
+    expect(redeemCouponResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('rejects redeemed: false', () => {
+    expect(redeemCouponResponseSchema.safeParse({ redeemed: false, rewardSlug: 'x', redeemedAt: '2026-07-08T10:00:00.000Z' }).success).toBe(false)
   })
 })

@@ -1,6 +1,7 @@
+import { randomBytes } from 'node:crypto'
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
-import { applyStreak, type EngagementStore, type EngagementWrite, type ErasureStore, type EventStore, type IngestionStore, type OfferMetricsStore, type ProgressStore, type Scope, type StatsStore, type StreakState, type TimedEventTransition, type UsageStore, type WebhookDeliveryStore } from '@promocean/core'
-import { achievementProgress, events, monthlyActiveUsers, offerEvents, pointsLedger, timedEventNotifications, unlocks, usageCounters, userStreaks, webhookDeadLetters } from './schema.js'
+import { applyStreak, couponCodeFromBytes, decideClaim, type EngagementStore, type EngagementWrite, type ErasureStore, type EventStore, type IngestionStore, type OfferMetricsStore, type ProgressStore, type RewardDefinition, type RewardStore, type Scope, type StatsStore, type StreakState, type TimedEventTransition, type UsageStore, type WebhookDeliveryStore } from '@promocean/core'
+import { achievementProgress, coupons, events, monthlyActiveUsers, offerEvents, pointsLedger, timedEventNotifications, unlocks, usageCounters, userStreaks, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
 
 const scoped = (t: { projectId: any; environment: any }, s: Scope) =>
@@ -221,7 +222,7 @@ export class PgEngagementStore implements EngagementStore {
       .limit(20)
     return {
       balance: balanceRow?.balance ?? 0,
-      recent: recentRows.map((r) => ({ delta: r.delta, source: r.source as 'event' | 'unlock', sourceRef: r.sourceRef, at: r.at })),
+      recent: recentRows.map((r) => ({ delta: r.delta, source: r.source as 'event' | 'unlock' | 'redemption', sourceRef: r.sourceRef, at: r.at })),
     }
   }
   async getStreak(scope: Scope, userId: string) {
@@ -432,6 +433,9 @@ export class PgErasureStore implements ErasureStore {
       const deletedStreaks = await tx.delete(userStreaks)
         .where(and(scoped(userStreaks, scope), eq(userStreaks.userId, userId)))
         .returning({ userId: userStreaks.userId })
+      const deletedCoupons = await tx.delete(coupons)
+        .where(and(scoped(coupons, scope), eq(coupons.userId, userId)))
+        .returning({ id: coupons.id })
       return {
         events: deletedEvents.length,
         progress: deletedProgress.length,
@@ -439,7 +443,176 @@ export class PgErasureStore implements ErasureStore {
         offerEvents: deletedOfferEvents.length,
         pointsLedger: deletedPointsLedger.length,
         streaks: deletedStreaks.length,
+        coupons: deletedCoupons.length,
       }
+    })
+  }
+}
+
+/**
+ * Detects the coupons_code_uq unique violation (Postgres SQLSTATE 23505) that a concurrent
+ * insert of the same generated code produces, tolerating drizzle's error wrapping (the pg
+ * error may surface directly or under `.cause`). We only treat *this* constraint as retryable;
+ * any other 23505 (or non-unique error) is rethrown so real bugs aren't masked.
+ */
+function isCouponCodeUniqueViolation(err: unknown): boolean {
+  let e: any = err
+  for (let depth = 0; depth < 5 && e != null; depth++) {
+    if (e.code === '23505' && (e.constraint === undefined || e.constraint === 'coupons_code_uq')) return true
+    e = e.cause
+  }
+  return false
+}
+
+export class PgRewardStore implements RewardStore {
+  constructor(private db: Db) {}
+
+  async getClaimCounts(scope: Scope, rewardIds: string[]) {
+    if (rewardIds.length === 0) return new Map<string, number>()
+    const rows = await this.db.select({
+      rewardId: coupons.rewardId,
+      count: sql<number>`count(*)::int`,
+    })
+      .from(coupons)
+      .where(and(scoped(coupons, scope), inArray(coupons.rewardId, rewardIds)))
+      .groupBy(coupons.rewardId)
+    return new Map(rows.map((r) => [r.rewardId, r.count]))
+  }
+
+  async claimCoupon(scope: Scope, userId: string, reward: RewardDefinition, now: Date) {
+    return this.db.transaction(async (tx) => {
+      const ns = `${scope.projectId}:${scope.environment}`
+      // Lock order is invariant: reward advisory lock first, then (only when the reward is
+      // priced) the user advisory lock. The user lock serializes ALL priced claims for a user
+      // across every reward, which is what makes the balance debit safe. A free reward never
+      // touches the wallet, so it skips the user lock entirely.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${ns}), hashtext(${'reward:' + reward.id}))`)
+      if (reward.pointsPrice > 0) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${ns}), hashtext(${'user:' + userId}))`)
+      }
+
+      const [claimedRow] = await tx.select({ n: sql<number>`count(*)::int` })
+        .from(coupons)
+        .where(and(scoped(coupons, scope), eq(coupons.rewardId, reward.id)))
+      const claimedCount = claimedRow?.n ?? 0
+
+      const [userRow] = await tx.select({ n: sql<number>`count(*)::int` })
+        .from(coupons)
+        .where(and(scoped(coupons, scope), eq(coupons.rewardId, reward.id), eq(coupons.userId, userId)))
+      const userClaimedCount = userRow?.n ?? 0
+
+      let balance = 0
+      if (reward.pointsPrice > 0) {
+        const [balRow] = await tx.select({ balance: sql<number>`COALESCE(SUM(${pointsLedger.delta}), 0)::int` })
+          .from(pointsLedger)
+          .where(and(scoped(pointsLedger, scope), eq(pointsLedger.userId, userId)))
+        balance = balRow?.balance ?? 0
+      }
+
+      const decision = decideClaim({ reward, now, claimedCount, userClaimedCount, balance })
+      if (!decision.ok) {
+        // Committed-but-empty: nothing was written, so nothing rolls back. Returning the
+        // rejection lets the transaction COMMIT cleanly.
+        return { ok: false as const, reason: decision.reason }
+      }
+
+      let couponId: string
+      let code: string
+      let claimedAt: Date
+
+      if (reward.codeType === 'static') {
+        // Should be unreachable in practice — the cms lifecycle requires a non-empty staticCode
+        // for every codeType: 'static' reward — but guard explicitly so a misconfigured reward
+        // fails with a clear message instead of an opaque NOT NULL constraint violation on the
+        // insert below.
+        if (!reward.staticCode) {
+          throw new Error(`static reward ${reward.id} has no staticCode configured`)
+        }
+        code = reward.staticCode
+        const [row] = await tx.insert(coupons)
+          .values({ ...scope, rewardId: reward.id, userId, code, codeShared: true })
+          .returning({ id: coupons.id, claimedAt: coupons.claimedAt })
+        couponId = row!.id
+        claimedAt = row!.claimedAt
+      } else {
+        // Generated codes: up to 3 insert attempts, regenerating entropy on each collision.
+        // Each attempt runs inside a SAVEPOINT (nested tx) so a 23505 rolls back only the
+        // failed insert, leaving the outer claim transaction alive to retry.
+        let inserted: { id: string; claimedAt: Date } | undefined
+        code = ''
+        for (let attempt = 0; attempt < 3; attempt++) {
+          code = couponCodeFromBytes(randomBytes(10), reward.codePrefix)
+          try {
+            inserted = await tx.transaction(async (sp) => {
+              const [row] = await sp.insert(coupons)
+                .values({ ...scope, rewardId: reward.id, userId, code, codeShared: false })
+                .returning({ id: coupons.id, claimedAt: coupons.claimedAt })
+              return row!
+            })
+            break
+          } catch (err) {
+            if (isCouponCodeUniqueViolation(err) && attempt < 2) continue
+            throw err
+          }
+        }
+        couponId = inserted!.id
+        claimedAt = inserted!.claimedAt
+      }
+
+      if (reward.pointsPrice > 0) {
+        await tx.insert(pointsLedger).values({
+          ...scope,
+          userId,
+          delta: -reward.pointsPrice,
+          source: 'redemption',
+          sourceRef: couponId,
+        })
+      }
+
+      return { ok: true as const, couponId, code, claimedAt, pointsSpent: reward.pointsPrice }
+    })
+  }
+
+  async validateCoupon(scope: Scope, code: string) {
+    const [row] = await this.db.select({ rewardId: coupons.rewardId, status: coupons.status })
+      .from(coupons)
+      .where(and(scoped(coupons, scope), eq(coupons.code, code)))
+      // Prefer an unredeemed (claimed) row so a shared code reports 'claimed' while any
+      // claim remains available; then oldest-first for a stable pick.
+      .orderBy(sql`(${coupons.status} = 'claimed') DESC`, asc(coupons.claimedAt))
+      .limit(1)
+    if (!row) return { found: false as const }
+    return { found: true as const, rewardId: row.rewardId, status: row.status as 'claimed' | 'redeemed' }
+  }
+
+  async redeemCoupon(scope: Scope, code: string) {
+    return this.db.transaction(async (tx) => {
+      const updated = await tx.execute<{ reward_id: string; redeemed_at: string | Date }>(sql`
+        UPDATE runtime.coupons SET status = 'redeemed', redeemed_at = now()
+        WHERE id = (
+          SELECT id FROM runtime.coupons
+          WHERE project_id = ${scope.projectId} AND environment = ${scope.environment}
+            AND code = ${code} AND status = 'claimed'
+          ORDER BY claimed_at ASC, id ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING reward_id, redeemed_at
+      `)
+      const row = updated.rows[0]
+      // Raw execute bypasses drizzle's parser mapping, so timestamptz arrives as wire text —
+      // normalize to a Date to satisfy the RewardStore contract.
+      if (row) return { ok: true as const, rewardId: row.reward_id, redeemedAt: new Date(row.redeemed_at) }
+
+      // Zero rows: either no coupon has this code (not_found), or every matching claim is
+      // already redeemed or was locked-then-redeemed by a concurrent redeemer (already_redeemed).
+      const existing = await tx.execute(sql`
+        SELECT 1 FROM runtime.coupons
+        WHERE project_id = ${scope.projectId} AND environment = ${scope.environment} AND code = ${code}
+        LIMIT 1
+      `)
+      if (existing.rows.length === 0) return { ok: false as const, reason: 'not_found' as const }
+      return { ok: false as const, reason: 'already_redeemed' as const }
     })
   }
 }

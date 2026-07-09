@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Promocean } from '@promocean/sdk'
-import { BadgeCabinet, EventCountdown, Leaderboard, Placement, PromoceanProvider, UnlockToast } from '@promocean/widgets'
+import { BadgeCabinet, EventCountdown, Leaderboard, Placement, PromoceanProvider, RewardsStore, UnlockToast } from '@promocean/widgets'
 
 export function Demo({ userId }: { userId: string }) {
   const client = useMemo(() => new Promocean({
@@ -12,6 +12,11 @@ export function Demo({ userId }: { userId: string }) {
   const [busy, setBusy] = useState(false)
   const [balance, setBalance] = useState(0)
   const [streak, setStreak] = useState(0)
+  // <RewardsStore/> only fetches its rewards/wallet once on mount (same
+  // fetch-once-and-remount contract documented for <Leaderboard/> in the
+  // widgets README) — bumping this key remounts it after a tracked event so
+  // its balance/claim-eligibility reflect newly earned points.
+  const [rewardsKey, setRewardsKey] = useState(0)
 
   // Refreshed on mount and again after every tracked event — points/streak
   // both change inside the same ingestion transaction a track() call awaits.
@@ -27,6 +32,7 @@ export function Demo({ userId }: { userId: string }) {
     try {
       await client.track(type)
       refreshEngagement()
+      setRewardsKey((k) => k + 1)
     } finally { setBusy(false) }
   }
 
@@ -45,6 +51,8 @@ export function Demo({ userId }: { userId: string }) {
           Points: <span data-testid="wallet-balance">{balance}</span> · Streak:{' '}
           <span data-testid="streak-count">{streak}</span> day(s)
         </p>
+        <h2>Rewards</h2>
+        <RewardsStore key={rewardsKey} title="Rewards store" />
         <h2>Your badges</h2>
         <BadgeCabinet />
         <UnlockToast />

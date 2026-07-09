@@ -107,6 +107,31 @@ export default {
         })),
     }
   },
+  async rewards(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const projectId = String(ctx.query.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
+    const rows = await strapi.documents('api::reward.reward').findMany({
+      filters: { project: { documentId: projectId } },
+    })
+    ctx.body = {
+      rewards: rows.map((r: any) => ({
+        id: r.documentId,
+        slug: r.slug,
+        name: r.name,
+        description: r.description ?? null,
+        codeType: r.codeType,
+        staticCode: r.staticCode ?? null,
+        codePrefix: r.codePrefix ?? null,
+        pointsPrice: r.pointsPrice ?? 0,
+        startsAt: r.startsAt ?? null,
+        endsAt: r.endsAt ?? null,
+        perUserLimit: r.perUserLimit ?? 1,
+        inventory: r.inventory ?? null,
+        enabled: r.enabled,
+      })),
+    }
+  },
   async webhookEndpoints(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()
     const projectId = String(ctx.query.projectId ?? '')

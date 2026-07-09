@@ -50,6 +50,13 @@
       "when": 1783571666825,
       "tag": "0006_warm_centennial",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783611084414,
+      "tag": "0007_true_lester",
+      "breakpoints": true
     }
   ]
 }
