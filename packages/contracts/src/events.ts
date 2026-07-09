@@ -8,6 +8,7 @@ export const trackEventRequestSchema = z.object({
   idempotencyKey: z.string().min(8).max(128),
   occurredAt: z.iso.datetime().optional(),
   meta: z.record(z.string(), z.unknown()).optional(),
+  tzOffsetMinutes: z.number().int().optional(),
 })
 export type TrackEventRequest = z.infer<typeof trackEventRequestSchema>
 

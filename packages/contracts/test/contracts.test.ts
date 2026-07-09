@@ -10,6 +10,10 @@ import {
   statsQuerySchema,
   statsResponseSchema,
   webhookMessageSchema,
+  walletResponseSchema,
+  streakResponseSchema,
+  leaderboardResponseSchema,
+  leaderboardWindowSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -196,6 +200,130 @@ describe('webhookMessageSchema', () => {
       createdAt: '2026-07-08T10:00:00.000Z',
     }
     const result = webhookMessageSchema.safeParse(payload)
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('trackEventRequestSchema with tzOffsetMinutes', () => {
+  it('accepts a track request without tzOffsetMinutes', () => {
+    const payload = {
+      userId: 'u1',
+      type: 'lesson_completed',
+      idempotencyKey: 'a'.repeat(12),
+    }
+    const result = trackEventRequestSchema.safeParse(payload)
+    expect(result.success).toBe(true)
+  })
+  it('accepts a track request with tzOffsetMinutes as integer', () => {
+    const payload = {
+      userId: 'u1',
+      type: 'lesson_completed',
+      idempotencyKey: 'a'.repeat(12),
+      tzOffsetMinutes: -300,
+    }
+    const result = trackEventRequestSchema.safeParse(payload)
+    expect(result.success).toBe(true)
+  })
+  it('rejects a track request with non-integer tzOffsetMinutes', () => {
+    const payload = {
+      userId: 'u1',
+      type: 'lesson_completed',
+      idempotencyKey: 'a'.repeat(12),
+      tzOffsetMinutes: -300.5,
+    }
+    const result = trackEventRequestSchema.safeParse(payload)
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('walletResponseSchema', () => {
+  it('round-trips a valid wallet response', () => {
+    const payload = {
+      balance: 100,
+      recent: [
+        { delta: 10, source: 'event', sourceRef: 'ref1', at: '2026-07-08T10:00:00.000Z' },
+        { delta: 5, source: 'unlock', sourceRef: 'ref2', at: '2026-07-08T11:00:00.000Z' },
+      ],
+    }
+    expect(walletResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('rejects unknown source enum', () => {
+    const payload = {
+      balance: 100,
+      recent: [
+        { delta: 10, source: 'unknown', sourceRef: 'ref1', at: '2026-07-08T10:00:00.000Z' },
+      ],
+    }
+    const result = walletResponseSchema.safeParse(payload)
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('streakResponseSchema', () => {
+  it('round-trips a valid streak response', () => {
+    const payload = {
+      current: 5,
+      longest: 10,
+      lastActiveDay: '2026-07-08',
+    }
+    expect(streakResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('accepts lastActiveDay as null', () => {
+    const payload = {
+      current: 0,
+      longest: 0,
+      lastActiveDay: null,
+    }
+    const result = streakResponseSchema.safeParse(payload)
+    expect(result.success).toBe(true)
+  })
+  it('enforces lastActiveDay format (YYYY-MM-DD)', () => {
+    const payloads = [
+      { current: 5, longest: 10, lastActiveDay: '2026/07/08' },
+      { current: 5, longest: 10, lastActiveDay: '2026-7-8' },
+      { current: 5, longest: 10, lastActiveDay: 'invalid' },
+    ]
+    for (const payload of payloads) {
+      const result = streakResponseSchema.safeParse(payload)
+      expect(result.success).toBe(false)
+    }
+  })
+})
+
+describe('leaderboardWindowSchema', () => {
+  it('accepts valid window values', () => {
+    for (const window of ['all', '7d', '30d']) {
+      const result = leaderboardWindowSchema.safeParse(window)
+      expect(result.success).toBe(true)
+    }
+  })
+  it('rejects invalid window values', () => {
+    for (const window of ['1d', '14d', 'invalid', '']) {
+      const result = leaderboardWindowSchema.safeParse(window)
+      expect(result.success).toBe(false)
+    }
+  })
+})
+
+describe('leaderboardResponseSchema', () => {
+  it('round-trips a valid leaderboard response', () => {
+    const payload = {
+      window: 'all',
+      entries: [
+        { rank: 1, userId: 'user1', points: 1000 },
+        { rank: 2, userId: 'user2', points: 950 },
+      ],
+    }
+    expect(leaderboardResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('rejects rank less than 1', () => {
+    const payload = {
+      window: '7d',
+      entries: [
+        { rank: 0, userId: 'user1', points: 1000 },
+      ],
+    }
+    const result = leaderboardResponseSchema.safeParse(payload)
     expect(result.success).toBe(false)
   })
 })
