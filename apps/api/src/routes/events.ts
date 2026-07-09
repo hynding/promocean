@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { trackEventRequestSchema, type TrackEventResponse } from '@promocean/contracts'
-import { activeMultiplier, evaluateEvent, suggestEventType, type Scope } from '@promocean/core'
+import {
+  activeMultiplier, evaluateEvent, localDayFromOffset, pointsForEvent, suggestEventType,
+  type EngagementWrite, type Scope,
+} from '@promocean/core'
 import type { AppDeps } from '../app.js'
 import { logger } from '../logger.js'
 
@@ -37,6 +40,13 @@ export function eventsRoute(deps: AppDeps) {
 
     const definitions = await deps.configStore.getAchievements(scope.projectId)
 
+    // Same fail-open contract as the registered-types gate above: a config-plane hiccup must
+    // not block ingestion, it just means no point award is applied for this request.
+    const pointRules = await deps.configStore.getPointRules(scope.projectId).catch((err) => {
+      logger.child({ requestId: c.get('requestId') }).warn({ err }, 'point rules fetch failed; skipping point award for this request')
+      return {}
+    })
+
     let multiplier = 1
     try {
       multiplier = activeMultiplier(await deps.configStore.getTimedEvents(scope.projectId), occurredAt)
@@ -47,11 +57,27 @@ export function eventsRoute(deps: AppDeps) {
     const plan = evaluateEvent({ userId, type, occurredAt }, definitions, multiplier)
     const month = new Date().toISOString().slice(0, 7)
 
+    // Built from the already-fetched `definitions` above — no second config-plane round trip.
+    // Safe lookup (not `!`): mirrors the nameById fallback below for the same reason (a store/
+    // evaluation mismatch must degrade gracefully, not throw).
+    const defsById = new Map(definitions.map((d) => [d.id, d]))
+    const eventPoints = pointsForEvent(pointRules, type)
+    const engagement: EngagementWrite = {
+      localDay: localDayFromOffset(occurredAt, parsed.data.tzOffsetMinutes),
+      eventPoints: eventPoints > 0 ? { points: eventPoints, sourceRef: type } : null,
+      unlockPoints: Object.fromEntries(
+        plan.increments
+          .filter((i) => (defsById.get(i.achievementId)?.pointsValue ?? 0) > 0)
+          .map((i) => [i.achievementId, defsById.get(i.achievementId)?.pointsValue ?? 0]),
+      ),
+    }
+
     const outcome = await deps.ingestionStore.ingestEvent(
       scope,
       { userId, type, idempotencyKey, occurredAt, meta },
       plan.increments.map(({ achievementId, delta, target }) => ({ achievementId, delta, target })),
       month,
+      engagement,
     )
     if (outcome.deduped) {
       return c.json({ deduped: true, unlocks: [], progress: [] } satisfies TrackEventResponse)

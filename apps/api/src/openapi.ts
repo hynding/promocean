@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   errorEnvelopeSchema,
   eraseUserResponseSchema,
+  leaderboardResponseSchema,
   liveEventsResponseSchema,
   offerClickRequestSchema,
   offerClickResponseSchema,
@@ -9,9 +10,11 @@ import {
   offerImpressionResponseSchema,
   placementOfferResponseSchema,
   statsResponseSchema,
+  streakResponseSchema,
   trackEventRequestSchema,
   trackEventResponseSchema,
   userAchievementsResponseSchema,
+  walletResponseSchema,
 } from '@promocean/contracts'
 
 // zod v4's z.toJSONSchema accepts a `target` option; 'openapi-3.0' produces
@@ -44,6 +47,9 @@ export function buildOpenApiDocument(version: string) {
     offerImpressionResponse: toSchema(offerImpressionResponseSchema),
     liveEventsResponse: toSchema(liveEventsResponseSchema),
     statsResponse: toSchema(statsResponseSchema),
+    walletResponse: toSchema(walletResponseSchema),
+    streakResponse: toSchema(streakResponseSchema),
+    leaderboardResponse: toSchema(leaderboardResponseSchema),
     errorEnvelope: toSchema(errorEnvelopeSchema),
   }
 
@@ -167,6 +173,48 @@ export function buildOpenApiDocument(version: string) {
           '403': {
             description: 'A publishable key was used; a secret key is required.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/users/{userId}/wallet': {
+      get: {
+        summary: "Get a user's points balance and recent ledger activity.",
+        parameters: [userIdParam],
+        responses: {
+          '200': {
+            description: 'Wallet balance and recent activity for the user.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/walletResponse' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/users/{userId}/streak': {
+      get: {
+        summary: "Get a user's current and longest daily-activity streak.",
+        parameters: [userIdParam],
+        responses: {
+          '200': {
+            description: 'Streak state for the user.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/streakResponse' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/leaderboard': {
+      get: {
+        summary: 'Rank users by points earned within a window.',
+        parameters: [
+          { name: 'window', in: 'query', required: false, schema: { type: 'string', enum: ['all', '7d', '30d'] } },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Ranked leaderboard entries for the requested window.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/leaderboardResponse' } } },
           },
           default: errorResponse,
         },

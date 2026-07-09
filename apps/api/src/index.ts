@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server'
-import { createDb, runMigrations, PgErasureStore, PgIngestionStore, PgOfferMetricsStore, PgProgressStore, PgStatsStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
+import { createDb, runMigrations, PgEngagementStore, PgErasureStore, PgIngestionStore, PgOfferMetricsStore, PgProgressStore, PgStatsStore, PgWebhookDeliveryStore } from '@promocean/adapter-db'
 import { StrapiConfigPlane } from '@promocean/adapter-strapi'
 import { createApp } from './app.js'
 import { envInt } from './env.js'
@@ -42,6 +42,7 @@ const app = createApp({
   offerMetricsStore: new PgOfferMetricsStore(db),
   erasureStore: new PgErasureStore(db),
   statsStore: new PgStatsStore(db),
+  engagementStore: new PgEngagementStore(db),
   webhooks,
   readiness: {
     checkDb: async () => { await db.$client.query('select 1') },

@@ -1,6 +1,6 @@
 import type {
-  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, ErasureStore, IngestionStore, OfferDefinition,
-  OfferMetricsStore, ProgressStore, Scope, StatsStore, TimedEventDefinition,
+  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, EngagementStore, EngagementWrite, ErasureStore,
+  IngestionStore, OfferDefinition, OfferMetricsStore, PointRules, ProgressStore, Scope, StatsStore, TimedEventDefinition,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
@@ -11,6 +11,7 @@ export function makeFakes(
   offers: OfferDefinition[] = [],
   timedEvents: TimedEventDefinition[] = [],
   registeredEventTypes: string[] = [],
+  pointRules: PointRules = {},
 ) {
   const seenIdem = new Set<string>()
   const progress = new Map<string, number>()
@@ -23,6 +24,7 @@ export function makeFakes(
     getAllTimedEvents: async () => [],
     getWebhookEndpoints: async () => [],
     getRegisteredEventTypes: async () => registeredEventTypes,
+    getPointRules: async () => pointRules,
   }
   const apiKeyStore: ApiKeyStore = { verifyKey: async (raw) => (raw === 'pk_test_valid_key_1' ? auth : null) }
   const progressStore: ProgressStore = {
@@ -48,8 +50,14 @@ export function makeFakes(
   // `unlockDates` maps with progressStore above so GET /users/:userId/achievements (still
   // reading through progressStore) reflects state written via ingestEvent, same as the real
   // stores share the same underlying tables.
+  // Recorded verbatim so tests can assert on exactly what the route computed and passed
+  // through — TS's function-parameter bivariance would let a 4-param fake satisfy
+  // IngestionStore's 5-param type silently, so the 5th param is named and captured explicitly
+  // rather than relied on via the compiler.
+  const engagementCalls: Array<{ scope: Scope; event: { userId: string; type: string; idempotencyKey: string; occurredAt: Date; meta?: Record<string, unknown> }; engagement: EngagementWrite }> = []
   const ingestionStore: IngestionStore = {
-    ingestEvent: async (scope, event, increments, month) => {
+    ingestEvent: async (scope, event, increments, month, engagement) => {
+      engagementCalls.push({ scope, event, engagement })
       const idemKey = sk(scope, event.idempotencyKey)
       if (seenIdem.has(idemKey)) return { deduped: true }
       seenIdem.add(idemKey)
@@ -114,8 +122,29 @@ export function makeFakes(
     },
   }
   const setStatsResult = (r: StatsResult) => { statsResult = r }
+
+  type WalletResult = Awaited<ReturnType<EngagementStore['getWallet']>>
+  type StreakResult = Awaited<ReturnType<EngagementStore['getStreak']>>
+  type LeaderboardResult = Awaited<ReturnType<EngagementStore['getLeaderboard']>>
+  let walletResult: WalletResult = { balance: 0, recent: [] }
+  let streakResult: StreakResult = { current: 0, longest: 0, lastActiveDay: null }
+  let leaderboardResult: LeaderboardResult = []
+  const leaderboardCalls: Array<{ scope: Scope; window: 'all' | '7d' | '30d'; limit: number }> = []
+  const engagementStore: EngagementStore = {
+    getWallet: async () => walletResult,
+    getStreak: async () => streakResult,
+    getLeaderboard: async (scope, window, limit) => {
+      leaderboardCalls.push({ scope, window, limit })
+      return leaderboardResult
+    },
+  }
+  const setWalletResult = (r: WalletResult) => { walletResult = r }
+  const setStreakResult = (r: StreakResult) => { streakResult = r }
+  const setLeaderboardResult = (r: LeaderboardResult) => { leaderboardResult = r }
+
   return {
     configStore, apiKeyStore, progressStore, ingestionStore, usage, offerMetricsStore, metrics, erasureStore,
-    erasedUsers, erasureCounts, statsStore, statsCalls, setStatsResult,
+    erasedUsers, erasureCounts, statsStore, statsCalls, setStatsResult, engagementCalls,
+    engagementStore, setWalletResult, setStreakResult, setLeaderboardResult, leaderboardCalls,
   }
 }
