@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { StrapiConfigPlane } from '../src/index.js'
 
-const achievementsBody = { achievements: [{ id: 'a1', name: 'First Lesson', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 1 }] }
+const achievementsBody = { achievements: [{ id: 'a1', name: 'First Lesson', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 1, pointsValue: 10 }] }
 const authBody = { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null }
 const ok = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
 
@@ -51,6 +51,17 @@ describe('StrapiConfigPlane.getAchievements', () => {
     await plane.getAchievements('p1')
     const defs = await plane.getAchievements('p1')
     expect(defs).toEqual(achievementsBody.achievements)
+  })
+  it('parses pointsValue through when present', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(achievementsBody))
+    const defs = await makePlane(fetchImpl).getAchievements('p1')
+    expect(defs[0].pointsValue).toBe(10)
+  })
+  it('defaults pointsValue to 0 when absent from the response', async () => {
+    const body = { achievements: [{ id: 'a2', name: 'No Points Yet', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 1 }] }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(body))
+    const defs = await makePlane(fetchImpl).getAchievements('p1')
+    expect(defs[0].pointsValue).toBe(0)
   })
 })
 
@@ -364,5 +375,44 @@ describe('StrapiConfigPlane.getRegisteredEventTypes', () => {
   it('throws on a malformed body with no cache', async () => {
     const plane = makePlane(vi.fn().mockImplementation(() => ok({ eventTypes: 'not-an-array' })))
     await expect(plane.getRegisteredEventTypes('p1')).rejects.toThrow()
+  })
+})
+
+const pointRulesBody = { pointRules: { lesson_completed: 10, quiz_passed: 5 } }
+
+describe('StrapiConfigPlane.getPointRules', () => {
+  it('fetches the correct URL with the secret header and returns the point rules', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(pointRulesBody))
+    const pointRules = await makePlane(fetchImpl).getPointRules('p1')
+    expect(pointRules).toEqual({ lesson_completed: 10, quiz_passed: 5 })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://cms.test/api/config-plane/projects/p1/point-rules')
+    expect(init.headers['x-config-secret']).toBe('s3cret')
+  })
+  it('caches within TTL (one fetch for two calls)', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(pointRulesBody))
+    const plane = makePlane(fetchImpl)
+    await plane.getPointRules('p1')
+    await plane.getPointRules('p1')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+  it('serves stale cache when a malformed body fails validation after expiry', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(pointRulesBody))
+      .mockImplementation(() => ok({ pointRules: 'not-an-object' }))
+    const plane = makePlane(fetchImpl, 0) // TTL 0: always expired
+    await plane.getPointRules('p1')
+    const pointRules = await plane.getPointRules('p1')
+    expect(pointRules).toEqual({ lesson_completed: 10, quiz_passed: 5 })
+  })
+  it('throws when strapi errors with no cache', async () => {
+    const plane = makePlane(vi.fn().mockImplementation(() => Promise.reject(new Error('down'))))
+    await expect(plane.getPointRules('p1')).rejects.toThrow()
+  })
+  it('drops non-integer and negative entries as defense in depth', async () => {
+    const body = { pointRules: { lesson_completed: 10, fractional: 1.5, negative: -3, zero: 0 } }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(body))
+    const pointRules = await makePlane(fetchImpl).getPointRules('p1')
+    expect(pointRules).toEqual({ lesson_completed: 10, zero: 0 })
   })
 })

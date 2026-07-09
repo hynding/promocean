@@ -27,6 +27,7 @@ export default {
         artworkUrl: r.artworkUrl ?? null,
         eventType: r.eventType,
         targetCount: r.targetCount,
+        pointsValue: r.pointsValue ?? 0,
       })),
     }
   },
@@ -139,6 +140,31 @@ export default {
       eventTypes = []
     }
     ctx.body = { eventTypes }
+  },
+  async pointRules(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const projectId = String(ctx.params.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
+    const project = await strapi.documents('api::project.project').findOne({ documentId: projectId })
+    if (!project) return ctx.notFound()
+    const raw = project.pointRules
+    let pointRules: Record<string, number>
+    if (raw == null) {
+      pointRules = {}
+    } else if (typeof raw === 'object' && !Array.isArray(raw)) {
+      pointRules = {}
+      for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+        if (!EVENT_TYPE_PATTERN.test(key) || typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+          strapi.log.warn(`[promocean] project ${project.documentId} pointRules entry "${key}" is invalid; dropping`)
+          continue
+        }
+        pointRules[key] = value
+      }
+    } else {
+      strapi.log.warn(`[promocean] project ${project.documentId} pointRules is not an object; ignoring`)
+      pointRules = {}
+    }
+    ctx.body = { pointRules }
   },
   async verifyKey(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()

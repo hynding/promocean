@@ -5,6 +5,7 @@ import type {
   AuthContext,
   ConfigStore,
   OfferDefinition,
+  PointRules,
   TimedEventDefinition,
   WebhookEndpointDefinition,
 } from '@promocean/core'
@@ -14,6 +15,7 @@ import {
   allTimedEventsResponseSchema,
   eventTypesResponseSchema,
   offersResponseSchema,
+  pointRulesResponseSchema,
   timedEventsResponseSchema,
   verifyKeyResponseSchema,
   webhookEndpointsResponseSchema,
@@ -60,6 +62,7 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   private allTimedEventsCache = new Map<string, CacheEntry<Array<TimedEventDefinition & { projectId: string }>>>()
   private webhookEndpointsCache = new Map<string, CacheEntry<WebhookEndpointDefinition[]>>()
   private eventTypesCache = new Map<string, CacheEntry<string[]>>()
+  private pointRulesCache = new Map<string, CacheEntry<PointRules>>()
 
   constructor(private opts: StrapiConfigPlaneOptions) {
     this.ttl = opts.cacheTtlMs ?? 30_000
@@ -242,6 +245,30 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
       const body = parseOrThrow(eventTypesResponseSchema, await res.json())
       this.eventTypesCache.set(projectId, { value: body.eventTypes, expires: Date.now() + this.ttl })
       return body.eventTypes
+    } catch (err) {
+      if (cached) return cached.value
+      throw err
+    }
+  }
+
+  async getPointRules(projectId: string): Promise<PointRules> {
+    const cached = this.pointRulesCache.get(projectId)
+    if (cached && cached.expires > Date.now()) return cached.value
+    try {
+      const res = await this.fetchImpl(
+        `${this.opts.baseUrl}/api/config-plane/projects/${encodeURIComponent(projectId)}/point-rules`,
+        { headers: this.headers() },
+      )
+      if (!res.ok) throw new Error(`config plane responded ${res.status}`)
+      const body = parseOrThrow(pointRulesResponseSchema, await res.json())
+      // Defense in depth: the cms already filters pointRules to non-negative integers before
+      // responding, but re-filter here cheaply rather than trust the wire format blindly.
+      const pointRules: PointRules = {}
+      for (const [eventType, value] of Object.entries(body.pointRules)) {
+        if (Number.isInteger(value) && value >= 0) pointRules[eventType] = value
+      }
+      this.pointRulesCache.set(projectId, { value: pointRules, expires: Date.now() + this.ttl })
+      return pointRules
     } catch (err) {
       if (cached) return cached.value
       throw err

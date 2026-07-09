@@ -1,4 +1,4 @@
-import type { AchievementDefinition, AuthContext, OfferDefinition, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
+import type { AchievementDefinition, AuthContext, OfferDefinition, PointRules, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
 
 export interface ConfigStore {
   getAchievements(projectId: string): Promise<AchievementDefinition[]>
@@ -7,6 +7,7 @@ export interface ConfigStore {
   getAllTimedEvents(): Promise<Array<TimedEventDefinition & { projectId: string }>>
   getWebhookEndpoints(projectId: string): Promise<WebhookEndpointDefinition[]>
   getRegisteredEventTypes(projectId: string): Promise<string[]>
+  getPointRules(projectId: string): Promise<PointRules>
 }
 
 export interface ApiKeyStore {
@@ -46,6 +47,18 @@ export interface OfferMetricsStore {
 }
 
 /**
+ * Engagement data attached to an ingest, computed by the route before the transaction:
+ * the client-tz local day (already offset-resolved), the point award for the event's type
+ * (if any rule matched), and the point value of each achievement newly unlocked by this
+ * ingest (only entries with pointsValue > 0 — zero-point unlocks award nothing).
+ */
+export interface EngagementWrite {
+  localDay: string // 'YYYY-MM-DD', already offset-resolved by the route
+  eventPoints: { points: number; sourceRef: string } | null // null when no rule matched
+  unlockPoints: Record<string, number> // achievementId -> pointsValue (>0 entries only)
+}
+
+/**
  * Applies an evaluation plan's increments atomically: inserts the event (deduping on
  * idempotencyKey), advances usage, clamps each achievement's progress at its target, and
  * decides unlocks — all in one transaction. The RETURNING progress/unlocks are the sole
@@ -57,10 +70,17 @@ export interface IngestionStore {
     event: { userId: string; type: string; idempotencyKey: string; occurredAt: Date; meta?: Record<string, unknown> },
     increments: { achievementId: string; delta: number; target: number }[],
     month: string, // usage-counter month key 'YYYY-MM'
+    engagement: EngagementWrite,
   ): Promise<
     | { deduped: true }
     | { deduped: false; progress: { achievementId: string; current: number; target: number }[]; newUnlocks: { achievementId: string; unlockedAt: Date }[] }
   >
+}
+
+export interface EngagementStore {
+  getWallet(scope: Scope, userId: string): Promise<{ balance: number; recent: Array<{ delta: number; source: 'event' | 'unlock'; sourceRef: string; at: Date }> }>
+  getStreak(scope: Scope, userId: string): Promise<{ current: number; longest: number; lastActiveDay: string | null }>
+  getLeaderboard(scope: Scope, window: 'all' | '7d' | '30d', limit: number): Promise<Array<{ rank: number; userId: string; points: number }>>
 }
 
 export interface StatsStore {
@@ -93,5 +113,5 @@ export interface WebhookDeliveryStore {
 }
 
 export interface ErasureStore {
-  eraseUser(scope: Scope, userId: string): Promise<{ events: number; progress: number; unlocks: number; offerEvents: number }>
+  eraseUser(scope: Scope, userId: string): Promise<{ events: number; progress: number; unlocks: number; offerEvents: number; pointsLedger: number; streaks: number }>
 }

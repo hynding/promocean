@@ -17,6 +17,7 @@ export const achievementsResponseSchema = z.object({
       artworkUrl: z.string().nullable(),
       eventType: z.string(),
       targetCount: z.number(),
+      pointsValue: z.number().int().min(0).default(0),
     }),
   ),
 })
@@ -71,6 +72,13 @@ export const webhookEndpointsResponseSchema = z.object({
 
 export const eventTypesResponseSchema = z.object({
   eventTypes: z.array(z.string()),
+})
+
+// Values are floored to non-negative integers on map (see StrapiConfigPlane.getPointRules) as
+// defense in depth — the cms config-plane controller already filters non-integer/negative
+// entries out of pointRules before responding, this mirrors that cheaply on our side too.
+export const pointRulesResponseSchema = z.object({
+  pointRules: z.record(z.string(), z.number()),
 })
 
 // allowedOrigins is intentionally z.unknown(): a junk value (wrong element types, non-array,

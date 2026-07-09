@@ -7,6 +7,8 @@ export const eraseUserResponseSchema = z.object({
     progress: z.number().int(),
     unlocks: z.number().int(),
     offerEvents: z.number().int(),
+    pointsLedger: z.number().int(),
+    streaks: z.number().int(),
   }),
 })
 export type EraseUserResponse = z.infer<typeof eraseUserResponseSchema>

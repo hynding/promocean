@@ -124,6 +124,9 @@ middleware so tooling can fetch the spec without a key.
 | POST | `/v1/offers/:id/impression` | pk or sk | Record an impression beacon for an offer (idempotent per `impressionId`). The `<Placement/>` widget fires this itself, once, only for offers that actually render (a dismissed offer never fires it). |
 | POST | `/v1/offers/:id/click` | pk or sk | Record a click on an offer's CTA. |
 | GET | `/v1/events/live` | pk or sk | List scheduled/live/ending-soon timed events and their multipliers. |
+| GET | `/v1/users/:userId/wallet` | pk or sk | Fetch a user's points wallet: running balance plus a short recent ledger of event-rule and achievement-unlock-bonus awards. |
+| GET | `/v1/users/:userId/streak` | pk or sk | Fetch a user's current/longest daily activity streak and last active (client-local) day. |
+| GET | `/v1/leaderboard` | pk or sk | Rank users in a project by total points. Optional `?window=all\|7d\|30d` (default `all`) and `?limit=` (default 10, max 100). See the privacy note below. |
 | GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
 | GET | `/docs` | none | Serve an HTML API reference (Redoc) rendered from the same OpenAPI document. |
@@ -168,6 +171,39 @@ catching typos like `lesson_completd`). Leave `registeredEventTypes` empty
 or unset and any event type is accepted, no enforcement — this is the
 default for projects that haven't opted in. The seeded demo project
 registers `lesson_completed` and `profile_completed`.
+
+### Points, streaks, leaderboards
+
+A project's `pointRules` config (CMS config-plane, `{ eventType: points }`)
+awards points for a tracked event, and an achievement's own `pointsValue`
+awards a bonus the moment that achievement unlocks — both are applied
+inside the same transaction as the event's ingestion, so `GET
+/v1/users/:userId/wallet` (running balance plus a short recent ledger,
+event awards and unlock bonuses labeled separately) never reflects a
+partially-applied event. `GET /v1/users/:userId/streak` reports the user's
+current/longest consecutive-day streak, advanced once per distinct
+client-local calendar day (see the tz-offset fallback below) — multiple
+events on the same local day don't double-count. `GET /v1/leaderboard`
+ranks all users in a project by total points, optionally windowed and
+limited (see the table above). Timed-event multipliers apply to achievement
+progress only; point awards are never multiplied.
+
+**Leaderboard privacy note:** these three endpoints are pk-accessible by
+design, and the leaderboard response exposes every ranked user's external
+`userId` (whatever id your app passes to `track()`/`identify()`) directly to
+anyone holding a publishable key. If your ids are anything identifying
+(emails, real names, etc.), don't pass them as-is: use an opaque/pseudonymous
+id with Promocean and map it to a display name in your own host app before
+rendering a leaderboard, rather than relying on Promocean to know or store
+any identity beyond the id you give it.
+
+**tz-offset fallback:** the SDK's `track()` sets `tzOffsetMinutes`
+automatically (minutes east of UTC, e.g. `+60` for UTC+1) from the browser's
+local timezone. Server-side callers may omit it. When it's missing,
+non-numeric, or otherwise invalid, the event's local day is computed as if
+the offset were `0` — i.e. it falls back to the UTC calendar day rather than
+failing the request. (A numeric offset outside the real-world range of
+±840 minutes / UTC-14..UTC+14 is clamped to the nearest bound instead.)
 
 ## Webhooks
 

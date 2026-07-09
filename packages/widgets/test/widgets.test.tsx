@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { UnlockPayload } from '@promocean/contracts'
-import { BadgeCabinet, EventCountdown, Placement, PromoceanProvider, UnlockToast } from '../src/index.js'
+import { BadgeCabinet, EventCountdown, Leaderboard, Placement, PromoceanProvider, UnlockToast } from '../src/index.js'
 
 // RTL's automatic afterEach cleanup only registers when `afterEach` exists as a
 // global; this project's vitest config doesn't set `test.globals: true`, so
@@ -22,6 +22,8 @@ function fakeClient(achievements: unknown[] = [], offer: unknown = null) {
       recordImpression: vi.fn().mockResolvedValue(undefined),
       dismissOffer: vi.fn(),
       isOfferDismissed: vi.fn().mockReturnValue(false),
+      getLeaderboard: vi.fn().mockResolvedValue({ window: 'all', entries: [] }),
+      currentUserId: undefined as string | undefined,
     } as any,
     emit: (u: UnlockPayload) => listeners.forEach((cb) => cb(u)),
   }
@@ -211,5 +213,84 @@ describe('EventCountdown', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('Leaderboard', () => {
+  const entries = [
+    { rank: 1, userId: 'u1', points: 500 },
+    { rank: 2, userId: 'u2', points: 420 },
+    { rank: 3, userId: 'u3', points: 100 },
+  ]
+
+  it('renders rows from the fake client', async () => {
+    const { client } = fakeClient()
+    client.getLeaderboard = vi.fn().mockResolvedValue({ window: 'all', entries })
+    const { container } = render(<PromoceanProvider client={client}><Leaderboard /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('u1')).toBeDefined())
+    expect(screen.getByText('u2')).toBeDefined()
+    expect(screen.getByText('u3')).toBeDefined()
+    expect(screen.getByText('500')).toBeDefined()
+    expect(container.querySelector('[data-promocean-leaderboard]')).not.toBeNull()
+  })
+
+  it('highlights the current user\'s row', async () => {
+    const { client } = fakeClient()
+    client.getLeaderboard = vi.fn().mockResolvedValue({ window: 'all', entries })
+    client.currentUserId = 'u2'
+    render(<PromoceanProvider client={client}><Leaderboard /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('u2')).toBeDefined())
+    const highlighted = screen.getByText('u2').closest('[data-promocean-current-user]')
+    expect(highlighted?.getAttribute('data-promocean-current-user')).toBe('true')
+    const other = screen.getByText('u1').closest('[data-promocean-current-user]')
+    expect(other?.getAttribute('data-promocean-current-user')).toBe('false')
+  })
+
+  it('renders nothing when getLeaderboard rejects', async () => {
+    const { client } = fakeClient()
+    client.getLeaderboard = vi.fn().mockRejectedValue(new Error('down'))
+    const { container } = render(<PromoceanProvider client={client}><Leaderboard /></PromoceanProvider>)
+    await waitFor(() => expect(client.getLeaderboard).toHaveBeenCalled())
+    expect(container.querySelector('[data-promocean-leaderboard]')).toBeNull()
+  })
+
+  it('renders nothing when entries are empty', async () => {
+    const { client } = fakeClient()
+    client.getLeaderboard = vi.fn().mockResolvedValue({ window: 'all', entries: [] })
+    const { container } = render(<PromoceanProvider client={client}><Leaderboard /></PromoceanProvider>)
+    await waitFor(() => expect(client.getLeaderboard).toHaveBeenCalled())
+    expect(container.querySelector('[data-promocean-leaderboard]')).toBeNull()
+  })
+
+  it('forwards window and limit to getLeaderboard and refetches on change', async () => {
+    const { client } = fakeClient()
+    client.getLeaderboard = vi.fn().mockResolvedValue({ window: '7d', entries })
+    const { rerender } = render(
+      <PromoceanProvider client={client}><Leaderboard window="7d" limit={5} /></PromoceanProvider>,
+    )
+    await waitFor(() => expect(client.getLeaderboard).toHaveBeenCalledWith({ window: '7d', limit: 5 }))
+    rerender(<PromoceanProvider client={client}><Leaderboard window="30d" limit={10} /></PromoceanProvider>)
+    await waitFor(() => expect(client.getLeaderboard).toHaveBeenCalledWith({ window: '30d', limit: 10 }))
+    expect(client.getLeaderboard).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders an optional title', async () => {
+    const { client } = fakeClient()
+    client.getLeaderboard = vi.fn().mockResolvedValue({ window: 'all', entries })
+    render(<PromoceanProvider client={client}><Leaderboard title="Top Learners" /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('u1')).toBeDefined())
+    expect(screen.getByText('Top Learners')).toBeDefined()
+  })
+
+  it('does not warn on state updates when unmounted before the fetch resolves', async () => {
+    const { client } = fakeClient()
+    let resolveLeaderboard!: (v: unknown) => void
+    client.getLeaderboard = vi.fn().mockReturnValue(new Promise((resolve) => { resolveLeaderboard = resolve }))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { unmount } = render(<PromoceanProvider client={client}><Leaderboard /></PromoceanProvider>)
+    unmount()
+    await act(async () => { resolveLeaderboard({ window: 'all', entries }) })
+    expect(consoleError).not.toHaveBeenCalled()
+    consoleError.mockRestore()
   })
 })
