@@ -41,3 +41,14 @@ describe('GET /v1/openapi.json', () => {
     expect(doc.info.version.length).toBeGreaterThan(0)
   })
 })
+
+describe('GET /docs', () => {
+  it('is reachable without an Authorization header and serves the Redoc viewer', async () => {
+    const res = await app().request('/docs')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toMatch(/text\/html/)
+    const html = await res.text()
+    expect(html).toContain('<redoc spec-url="/v1/openapi.json"></redoc>')
+    expect(html).toContain('cdn.redoc.ly')
+  })
+})

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { WebhookDispatcher } from '../src/webhooks.js'
 import { createApp } from '../src/app.js'
+import { logger } from '../src/logger.js'
 import { makeFakes } from './fakes.js'
 
 const defs = [
@@ -83,6 +84,36 @@ describe('POST /v1/events', () => {
     const res = await createApp(fakes).request('/v1/events', { method: 'POST', headers, body: body('k1234567') })
     expect(res.status).toBe(200)
     expect((await res.json()).deduped).toBe(false)
+  })
+  it('logs the registered-event-types fetch failure via a child logger carrying the request id', async () => {
+    const fakes = makeFakes(defs, auth, [], [], ['lesson_completed'])
+    fakes.configStore.getRegisteredEventTypes = async () => { throw new Error('config plane down') }
+    const childSpy = vi.spyOn(logger, 'child')
+    const res = await createApp(fakes).request('/v1/events', { method: 'POST', headers, body: body('k1234567') })
+    expect(res.status).toBe(200)
+    expect(childSpy).toHaveBeenCalledWith({ requestId: expect.any(String) })
+    childSpy.mockRestore()
+  })
+  it('falls back to the achievement id as the name when a reported unlock is absent from the increments plan', async () => {
+    // Regression guard for a store/evaluation mismatch: the ingestion store is the source of
+    // truth for *which* achievements unlocked, but names come from the increments plan built
+    // from this request's evaluateEvent() call. If the store reports an unlock for an id that
+    // plan doesn't know about (e.g. config changed between evaluation and commit), nameById.get
+    // would previously return undefined and `!`-assert past it — a type-level lie with no
+    // runtime effect, except that c.json's JSON.stringify() drops undefined-valued keys, so the
+    // response's unlock silently loses its "name" key instead of crashing.
+    const fakes = makeFakes(defs, auth)
+    fakes.ingestionStore.ingestEvent = async () => ({
+      deduped: false,
+      progress: [],
+      newUnlocks: [{ achievementId: 'ghost-achievement', unlockedAt: new Date('2026-07-08T00:00:00.000Z') }],
+    })
+    const res = await createApp(fakes).request('/v1/events', { method: 'POST', headers, body: body('ghost0001') })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.unlocks).toEqual([
+      { achievementId: 'ghost-achievement', name: 'ghost-achievement', unlockedAt: '2026-07-08T00:00:00.000Z' },
+    ])
   })
 })
 

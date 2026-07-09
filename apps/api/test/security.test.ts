@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { Hono } from 'hono'
 import type { AuthContext } from '@promocean/core'
 import { createApp } from '../src/app.js'
+import { createRateLimiter } from '../src/rate-limit.js'
 import { makeFakes } from './fakes.js'
 
 const defs = [
@@ -51,6 +53,79 @@ describe('rate limiting', () => {
     // a different (invalid) token gets its own bucket; still 401 (auth runs after rate limiter) not 429
     const res2 = await app.request('/v1/users/u1/achievements', { headers: { ...headers, authorization: 'Bearer other_key' } })
     expect(res2.status).toBe(401)
+  })
+})
+
+describe('rate limiter bucket bounds', () => {
+  function buildApp(limiter: ReturnType<typeof createRateLimiter>) {
+    const app = new Hono()
+    app.use('*', limiter)
+    app.get('/', (c) => c.text('ok'))
+    return app
+  }
+
+  it('sweeps expired buckets on the requester bucket rollover instead of growing forever', async () => {
+    let now = 0
+    const limiter = createRateLimiter(10, { now: () => now, maxBuckets: 50 })
+    const app = buildApp(limiter)
+
+    // Window 1: 5 distinct keys, one request each.
+    for (let i = 0; i < 5; i++) {
+      await app.request('/', { headers: { authorization: `Bearer key-${i}` } })
+    }
+    expect(limiter._bucketCount()).toBe(5)
+
+    // Advance past the window; a request from a pre-existing key (key-0) rolls its own
+    // bucket over, which triggers the lazy sweep of the 5 now-expired buckets.
+    now = 61_000
+    await app.request('/', { headers: { authorization: 'Bearer key-0' } })
+    expect(limiter._bucketCount()).toBe(1)
+  })
+
+  it('does not sweep buckets during new-key ramp-up; sweep only fires on pre-existing-bucket rollover', async () => {
+    let now = 0
+    const limiter = createRateLimiter(10, { now: () => now, maxBuckets: 50 })
+    const app = buildApp(limiter)
+
+    // Window 1: Add 5 distinct keys. Each is a new-key creation (no sweep).
+    for (let i = 0; i < 5; i++) {
+      await app.request('/', { headers: { authorization: `Bearer key-${i}` } })
+      // Bucket count should grow monotonically; no sweep has happened.
+      expect(limiter._bucketCount()).toBe(i + 1)
+    }
+
+    // Advance past the window.
+    now = 61_000
+
+    // Add a new key in the new window. This is also a new-key creation (no sweep).
+    await app.request('/', { headers: { authorization: 'Bearer key-new-a' } })
+    // The old 5 buckets are still present; we're at 6. No sweep has fired.
+    expect(limiter._bucketCount()).toBe(6)
+
+    // Now cause a pre-existing key (key-0) to roll over. This triggers the sweep.
+    await app.request('/', { headers: { authorization: 'Bearer key-0' } })
+    // After the sweep, the 5 expired buckets should be gone, leaving key-0 and key-new-a.
+    expect(limiter._bucketCount()).toBe(2)
+  })
+
+  it('shares a single overflow bucket for new keys once at cap, still enforcing the limit (never unlimited, never hard-denied)', async () => {
+    let now = 0
+    const limiter = createRateLimiter(1, { now: () => now, maxBuckets: 2 })
+    const app = buildApp(limiter)
+
+    // Fill the cap with two distinct keys.
+    await app.request('/', { headers: { authorization: 'Bearer key-a' } })
+    await app.request('/', { headers: { authorization: 'Bearer key-b' } })
+    expect(limiter._bucketCount()).toBe(2)
+
+    // Two more distinct new keys arrive at cap: both land in the shared overflow
+    // bucket (bucket count stays bounded at cap+1), and since limitPerMinute is 1,
+    // the second of the two 429s alongside the first at the shared limit.
+    const res1 = await app.request('/', { headers: { authorization: 'Bearer key-c' } })
+    const res2 = await app.request('/', { headers: { authorization: 'Bearer key-d' } })
+    expect(res1.status).toBe(200)
+    expect(res2.status).toBe(429)
+    expect(limiter._bucketCount()).toBe(3) // key-a, key-b, __overflow__
   })
 })
 

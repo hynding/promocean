@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { UnlockPayload } from '@promocean/contracts'
@@ -116,6 +117,18 @@ describe('Placement', () => {
     await waitFor(() => expect(client.getPlacementOffer).toHaveBeenCalled())
     expect(container.querySelector('[data-promocean-placement]')).toBeNull()
     expect(client.recordImpression).not.toHaveBeenCalled()
+  })
+  it('fires the impression beacon exactly once under StrictMode double-invoked effects', async () => {
+    const { client } = fakeClient()
+    client.getPlacementOffer = vi.fn().mockResolvedValue(offerCreative)
+    render(
+      <StrictMode>
+        <PromoceanProvider client={client}><Placement slug="homepage-banner" /></PromoceanProvider>
+      </StrictMode>,
+    )
+    await waitFor(() => expect(screen.getByText('Welcome to Promocean')).toBeDefined())
+    expect(client.recordImpression).toHaveBeenCalledTimes(1)
+    expect(client.recordImpression).toHaveBeenCalledWith('o1')
   })
   it('does not fire an impression beacon when unmounted before the fetch resolves', async () => {
     const { client } = fakeClient()

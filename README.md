@@ -12,7 +12,39 @@ multiplier wins — multipliers don't stack. Progress is always **clamped at
 the achievement target**, so a ×2 event takes 9/10 to 10/10, not 11. Event
 windows (`startsAt`/`endsAt`) are absolute UTC instants, not durations.
 
-## Quickstart (dev)
+## Quickstart
+
+The fastest way to see the whole thing working — clone, then one command:
+
+    git clone https://github.com/hynding/promocean.git
+    cd promocean
+    cp .env.example .env
+    docker compose --profile stack up
+
+This builds and boots Postgres, the Strapi CMS, the API, and the demo app
+(each gated behind healthchecks, so services come up in the right order), and
+seeds a demo project with test API keys. Once it's up:
+
+- `http://localhost:3002/?user=manual-1` — the demo app; click **Complete a
+  lesson** to see an achievement unlock live.
+- `http://localhost:3002/stats` — server-rendered aggregate stats for
+  everything you just did.
+- `http://localhost:1337/admin` — the Strapi CMS admin (log in with the
+  `ADMIN_EMAIL`/`ADMIN_PASSWORD` from your `.env`).
+- `http://localhost:3001/v1/openapi.json` — the API's OpenAPI document.
+
+Tear it down with `docker compose --profile stack down` (add `-v` to also
+drop the Postgres volume).
+
+Note: `.env.example` sets `SEED_DEMO=true`, which seeds a publicly known demo
+publishable key (`pk_test_demo_…`) — fine for local dev and CI, but this must
+never be enabled in a staging or production environment.
+
+## Quickstart (dev, no Docker for the apps)
+
+Postgres still runs in a container (profile-less, so it starts on its own);
+`cms`, `api`, and `demo` run on the host via Turborepo instead of as compose
+services — useful for iterating on app code without rebuilding images:
 
     corepack enable && pnpm install
     pnpm build
@@ -24,10 +56,6 @@ The `dev` task starts every app in parallel via Turborepo, but `cms` and `api`
 each need their own environment configured first — see below for a from-scratch
 setup that boots the full stack (cms + api + demo) and proves the achievement
 loop end to end.
-
-Note: `.env.example` sets `SEED_DEMO=true`, which seeds a publicly known demo
-publishable key (`pk_test_demo_…`) — fine for local dev and CI, but this must
-never be enabled in a staging or production environment.
 
 ### Running the full stack manually
 
@@ -77,7 +105,8 @@ above):
     pnpm --filter demo e2e
 
 This is also run in CI as the `e2e` job in `.github/workflows/ci.yml`, which
-boots Postgres, cms, and api with throwaway secrets before running the spec.
+builds the images and runs `docker compose --profile stack up -d --wait`
+(the same one-command flow above) before running the spec against it.
 
 ## API surface
 
@@ -97,14 +126,36 @@ middleware so tooling can fetch the spec without a key.
 | GET | `/v1/events/live` | pk or sk | List scheduled/live/ending-soon timed events and their multipliers. |
 | GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
+| GET | `/docs` | none | Serve an HTML API reference (Redoc) rendered from the same OpenAPI document. |
 
 Every key is rate-limited independently at `RATE_LIMIT_PER_MINUTE` requests
 per minute (default `300`; single-instance in-memory bucket, keyed by a hash
 of the key), returning `429 rate_limited` with a `retry-after` header once
-exceeded. Publishable keys additionally enforce an `allowedOrigins`
+exceeded. The number of distinct buckets tracked is bounded by
+`RATE_LIMIT_MAX_BUCKETS` (default `10000`); once at the cap, keys not yet seen
+in the current window share a single overflow bucket (still counted and
+429-able) rather than growing memory unboundedly. Publishable keys additionally enforce an `allowedOrigins`
 allowlist when one is configured on the key: requests carrying an `Origin`
 header not on that list are rejected with `403 origin_not_allowed` (secret
 keys, and requests with no `Origin` header, are exempt from this check).
+
+### Data retention
+
+`DELETE /v1/users/:userId` erases a user's events, progress, unlocks, and
+offer_events rows in one transaction, but **MAU (monthly active user)
+counter rows are retained** — they exist for usage-based billing history and
+contain only the project/environment/month and the external user id, no
+event content.
+
+**Log retention:** every request is logged (`apps/api/src/app.ts`'s request
+middleware) with the request path, which for user-scoped routes (e.g. `GET
+/v1/users/:userId/achievements`, `DELETE /v1/users/:userId`) includes the
+caller-supplied external `userId` verbatim. Erasure does **not** reach back
+into already-emitted logs — it only deletes database rows. If you ship
+these logs to persistent storage (stdout capture, a log aggregator, etc.),
+applying your own rotation/retention policy — and redacting or expiring user
+identifiers out of it in line with your data-retention obligations — is the
+operator's responsibility, not something this API does for you.
 
 ### Registered event types
 
@@ -118,6 +169,51 @@ or unset and any event type is accepted, no enforcement — this is the
 default for projects that haven't opted in. The seeded demo project
 registers `lesson_completed` and `profile_completed`.
 
+## Webhooks
+
+The api dispatches signed `POST` webhooks for `timed_event.live` /
+`timed_event.ending_soon` / `timed_event.ended` (fired by a 30s lifecycle
+scheduler as events cross those thresholds) and `achievement.unlocked`
+(fired inline from `POST /v1/events` when a track call unlocks an
+achievement). Every message carries a `messageId` (a uuid) — **consumers
+must dedup by `messageId`, not by event/transition**: a redelivery of a
+timed-event transition is sent as a brand-new message with a fresh
+`messageId`, not a retry of the original one. Also verify the
+`x-promocean-signature` HMAC header and check the signed `createdAt`
+against a replay window (e.g. reject anything older than a few minutes) —
+both belong in your consumer regardless of transport.
+
+Timed-event delivery is claim-then-mark: the scheduler claims a transition
+once, delivers it to every enabled endpoint (each endpoint independently
+retries transient failures and is dead-lettered on permanent failure), then
+marks the claim delivered. If the process crashes between delivering and
+marking, the claim is left stale and a later tick's **redelivery sweep**
+re-drives it (incrementing an attempt counter, capped at 5 attempts) with a
+freshly built message and a new `messageId`, as above. A **retention
+sweep** on the same tick purges dead letters older than
+`WEBHOOK_DEAD_LETTER_TTL_DAYS` (default 30). Once redelivery attempts hit
+the cap of 5, an **exhaustion sweep** on the same tick dead-letters the
+claim (`<exhausted>`) and marks it delivered so it stops being retried.
+Disabling an event stops its lifecycle transitions
+from firing at whatever point the disable happens: an event disabled
+before ever going live emits no messages at all, and one disabled after
+going live emits no `ended` message either — its state simply snaps back
+to draft.
+
+The dispatcher `POST`s directly to whatever URL a project configures as a
+webhook endpoint. There is currently no SSRF protection (e.g. blocking
+private/internal IP ranges) — treat endpoint URLs as trusted input for now.
+Blocking requests to private IP ranges is required before this becomes a
+multi-tenant, self-service feature and is tracked as future work.
+
+Scheduler tuning (all optional, read once at process start):
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `WEBHOOK_REDELIVERY_GRACE_MINUTES` | `5` | How long a claimed-but-undelivered transition sits before the redelivery sweep re-drives it. |
+| `TIMED_EVENT_SCAN_GRACE_MINUTES` | `60` | How far back the config-plane scan window looks for timed events. Must exceed the redelivery grace (a shorter scan window would let events drop out of the feed before a stale claim could ever be redriven) — if misconfigured, the scheduler logs a warning at startup and clamps it to `WEBHOOK_REDELIVERY_GRACE_MINUTES + 5`. If the api is down longer than this grace, transitions that occurred during the outage are dropped permanently — no claim is ever made and no dead letter is recorded — so size it to your expected downtime. |
+| `WEBHOOK_DEAD_LETTER_TTL_DAYS` | `30` | Dead letters older than this are purged by the retention sweep. |
+
 ## Publishing
 
 MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) publish via a two-step manual flow:
@@ -126,4 +222,18 @@ MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) pu
 
 2. **Bump versions**: Before releasing, run `pnpm changeset version` to consume pending changesets, bump `package.json` versions, and update changelogs. Commit and merge this version bump.
 
-3. **Publish to npm**: Trigger the **Release** workflow from GitHub Actions (Actions → Release → Run workflow). The workflow builds packages and runs `changeset publish`, publishing any versions not yet on npm. Requires the `NPM_TOKEN` repo secret.
+3. **Publish to npm**: Trigger the **Release** workflow from GitHub Actions (Actions → Release → Run workflow). The workflow runs the package test suite, builds packages, and runs `changeset publish` (which also tags each published version — the workflow pushes those tags to origin afterwards), publishing any versions not yet on npm. Requires the `NPM_TOKEN` repo secret.
+
+### Changeset authoring
+
+When you run `pnpm changeset`, only select the packages your change actually
+touched (or whose public behavior it affects transitively). `changeset`
+defaults to listing every package it's asked about, so it's easy to
+over-select — e.g. tick `@promocean/sdk` for a change that only touched
+`@promocean/widgets`. An over-broad changeset produces a changelog entry
+("version bump") on a package with nothing to say why, which is confusing
+for consumers reading release notes. If a package's version is only bumping
+because `updateInternalDependencies: "patch"` cascaded a workspace
+dependency bump (see `.changeset/config.json`), that's expected and separate
+from this — the authoring step is about which packages *you* list, not
+about the automatic dependency-bump cascade.

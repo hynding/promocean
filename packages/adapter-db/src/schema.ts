@@ -73,6 +73,8 @@ export const timedEventNotifications = runtime.table('timed_event_notifications'
   eventId: text('event_id').notNull(),
   transition: text('transition').notNull(),
   firedAt: timestamp('fired_at', { withTimezone: true }).defaultNow().notNull(),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  attempts: integer('attempts').notNull().default(0),
 }, (t) => [uniqueIndex('event_notif_uq').on(t.projectId, t.eventId, t.transition)])
 
 export const webhookDeadLetters = runtime.table('webhook_dead_letters', {

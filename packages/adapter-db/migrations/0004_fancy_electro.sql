@@ -1,0 +1,2 @@
+ALTER TABLE "runtime"."timed_event_notifications" ADD COLUMN "delivered_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "runtime"."timed_event_notifications" ADD COLUMN "attempts" integer DEFAULT 0 NOT NULL;

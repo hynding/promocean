@@ -7,7 +7,9 @@ import {
   eraseUserResponseSchema,
   offerImpressionRequestSchema,
   offerImpressionResponseSchema,
+  statsQuerySchema,
   statsResponseSchema,
+  webhookMessageSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -92,6 +94,28 @@ describe('offerImpressionRequestSchema', () => {
     })
     expect(result.success).toBe(false)
   })
+  it('accepts a request with userId omitted (anonymous impression)', () => {
+    const result = offerImpressionRequestSchema.safeParse({
+      impressionId: '550e8400-e29b-41d4-a716-446655440000',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data).toEqual({ impressionId: '550e8400-e29b-41d4-a716-446655440000' })
+  })
+})
+
+describe('statsQuerySchema', () => {
+  it('accepts a valid Z-suffixed ISO datetime for from/to', () => {
+    const result = statsQuerySchema.safeParse({ from: '2026-01-01T00:00:00.000Z', to: '2026-12-31T23:59:59.999Z' })
+    expect(result.success).toBe(true)
+  })
+  it('rejects a junk datetime string', () => {
+    const result = statsQuerySchema.safeParse({ from: 'not-a-date' })
+    expect(result.success).toBe(false)
+  })
+  it('accepts an empty object (both bounds optional)', () => {
+    const result = statsQuerySchema.safeParse({})
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('offerImpressionResponseSchema', () => {
@@ -142,5 +166,36 @@ describe('error codes', () => {
       error: { code: 'unregistered_event_type', message: 'Event type not registered' },
     })
     expect(result.success).toBe(true)
+  })
+  it('accepts not_found error code', () => {
+    const result = errorEnvelopeSchema.safeParse({
+      error: { code: 'not_found', message: 'Resource not found' },
+    })
+    expect(result.success).toBe(true)
+  })
+})
+
+describe('webhookMessageSchema', () => {
+  it('accepts a message with messageId', () => {
+    const payload = {
+      messageId: '550e8400-e29b-41d4-a716-446655440000',
+      type: 'timed_event.live',
+      data: { eventId: 'e1' },
+      createdAt: '2026-07-08T10:00:00.000Z',
+    }
+    const result = webhookMessageSchema.safeParse(payload)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toEqual(payload)
+    }
+  })
+  it('rejects a message without messageId', () => {
+    const payload = {
+      type: 'timed_event.live',
+      data: { eventId: 'e1' },
+      createdAt: '2026-07-08T10:00:00.000Z',
+    }
+    const result = webhookMessageSchema.safeParse(payload)
+    expect(result.success).toBe(false)
   })
 })

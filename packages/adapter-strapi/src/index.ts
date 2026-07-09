@@ -24,6 +24,12 @@ export interface StrapiConfigPlaneOptions {
   configSecret: string
   cacheTtlMs?: number
   fetchImpl?: typeof fetch
+  /** When set, getAllTimedEvents requests only events that ended within the last N minutes
+   * (or haven't ended yet) via `?endedWithinMinutes=<n>`, keeping the scan feed bounded. */
+  allTimedEventsEndedWithinMinutes?: number
+  /** Max number of cached `null` (unknown-key) verifyKey results tracked before the
+   * oldest is evicted. Bounds unbounded growth from random/invalid key probing. Default 1000. */
+  maxNegativeAuthEntries?: number
 }
 
 interface CacheEntry<T> { value: T; expires: number }
@@ -44,6 +50,12 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   private achievementsCache = new Map<string, CacheEntry<AchievementDefinition[]>>()
   private offersCache = new Map<string, CacheEntry<OfferDefinition[]>>()
   private authCache = new Map<string, CacheEntry<AuthContext | null>>()
+  // Insertion-ordered set of keyHashes currently cached with a `null` (unknown-key)
+  // verifyKey result — a Set preserves insertion order, so its first entry is always
+  // the oldest, letting us evict FIFO without a separate linked-list/queue structure.
+  // Positive (non-null) results are never tracked here and never evicted by this bound.
+  private nullAuthKeys = new Set<string>()
+  private readonly maxNegativeAuthEntries: number
   private timedEventsCache = new Map<string, CacheEntry<TimedEventDefinition[]>>()
   private allTimedEventsCache = new Map<string, CacheEntry<Array<TimedEventDefinition & { projectId: string }>>>()
   private webhookEndpointsCache = new Map<string, CacheEntry<WebhookEndpointDefinition[]>>()
@@ -52,6 +64,27 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
   constructor(private opts: StrapiConfigPlaneOptions) {
     this.ttl = opts.cacheTtlMs ?? 30_000
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch
+    this.maxNegativeAuthEntries = opts.maxNegativeAuthEntries ?? 1000
+  }
+
+  /** Sets an authCache entry while maintaining the bounded negative-result tracking:
+   * evicts the oldest cached `null` entry when caching a new `null` at capacity, and
+   * untracks a key that transitions from a cached `null` to a positive result (so it
+   * can't later be evicted as if it were still a stale null). */
+  private setAuthCacheEntry(keyHash: string, entry: CacheEntry<AuthContext | null>) {
+    if (entry.value === null) {
+      if (!this.nullAuthKeys.has(keyHash) && this.nullAuthKeys.size >= this.maxNegativeAuthEntries) {
+        const oldest = this.nullAuthKeys.values().next().value
+        if (oldest !== undefined) {
+          this.nullAuthKeys.delete(oldest)
+          this.authCache.delete(oldest)
+        }
+      }
+      this.nullAuthKeys.add(keyHash) // no-op if already present; Set keeps original insertion order
+    } else {
+      this.nullAuthKeys.delete(keyHash)
+    }
+    this.authCache.set(keyHash, entry)
   }
 
   private headers() {
@@ -145,7 +178,11 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
     const cached = this.allTimedEventsCache.get(key)
     if (cached && cached.expires > Date.now()) return cached.value
     try {
-      const res = await this.fetchImpl(`${this.opts.baseUrl}/api/config-plane/timed-events/all`, {
+      const url = new URL(`${this.opts.baseUrl}/api/config-plane/timed-events/all`)
+      if (this.opts.allTimedEventsEndedWithinMinutes !== undefined) {
+        url.searchParams.set('endedWithinMinutes', String(this.opts.allTimedEventsEndedWithinMinutes))
+      }
+      const res = await this.fetchImpl(url, {
         headers: this.headers(),
       })
       if (!res.ok) throw new Error(`config plane responded ${res.status}`)
@@ -249,7 +286,7 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
       // Deliberate fail-closed trade-off: caching `null` here overwrites even a previously-good
       // cached AuthContext for one TTL window if the CMS starts returning malformed bodies
       // (auth boundary: correctness over availability).
-      this.authCache.set(keyHash, { value, expires: Date.now() + this.ttl })
+      this.setAuthCacheEntry(keyHash, { value, expires: Date.now() + this.ttl })
       return value
     } catch (err) {
       if (cached) return cached.value

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { trackEventRequestSchema, type TrackEventResponse } from '@promocean/contracts'
 import { activeMultiplier, evaluateEvent, suggestEventType, type Scope } from '@promocean/core'
@@ -19,7 +20,9 @@ export function eventsRoute(deps: AppDeps) {
     // Config-plane failure must not block ingestion: fail open (same pattern as the
     // multiplier lookup below), just without enforcement for this request.
     const registered = await deps.configStore.getRegisteredEventTypes(scope.projectId).catch((err) => {
-      logger.warn({ err }, 'registered event types fetch failed; skipping unregistered-event-type enforcement')
+      logger.child({ requestId: c.get('requestId') }).warn(
+        { err }, 'registered event types fetch failed; skipping unregistered-event-type enforcement',
+      )
       return [] as string[]
     })
     if (registered.length > 0 && !registered.includes(type)) {
@@ -38,7 +41,7 @@ export function eventsRoute(deps: AppDeps) {
     try {
       multiplier = activeMultiplier(await deps.configStore.getTimedEvents(scope.projectId), occurredAt)
     } catch (err) {
-      logger.warn({ err }, 'timed events fetch failed; defaulting multiplier to 1')
+      logger.child({ requestId: c.get('requestId') }).warn({ err }, 'timed events fetch failed; defaulting multiplier to 1')
     }
 
     const plan = evaluateEvent({ userId, type, occurredAt }, definitions, multiplier)
@@ -57,13 +60,14 @@ export function eventsRoute(deps: AppDeps) {
     const nameById = new Map(plan.increments.map((i) => [i.achievementId, i.name]))
     const unlocks: TrackEventResponse['unlocks'] = outcome.newUnlocks.map((u) => ({
       achievementId: u.achievementId,
-      name: nameById.get(u.achievementId)!,
+      name: nameById.get(u.achievementId) ?? u.achievementId,
       unlockedAt: u.unlockedAt.toISOString(),
     }))
 
     if (unlocks.length > 0 && deps.webhooks) {
       void deps.webhooks
         .deliver(scope.projectId, {
+          messageId: randomUUID(),
           type: 'achievement.unlocked',
           data: { userId, environment: scope.environment, unlocks },
           createdAt: unlocks[0]!.unlockedAt,

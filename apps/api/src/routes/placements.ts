@@ -24,7 +24,7 @@ export function placementsRoute(deps: AppDeps) {
     try {
       active = activeEventIds(await deps.configStore.getTimedEvents(scope.projectId), now)
     } catch (err) {
-      logger.warn({ err }, 'timed events fetch failed; event-attached offers hidden')
+      logger.child({ requestId: c.get('requestId') }).warn({ err }, 'timed events fetch failed; event-attached offers hidden')
     }
     const offer = resolveOffer(slug, offers, now, active)
     return c.json({

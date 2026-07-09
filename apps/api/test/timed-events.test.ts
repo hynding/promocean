@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { OfferDefinition, TimedEventDefinition } from '@promocean/core'
 import { createApp } from '../src/app.js'
+import { logger } from '../src/logger.js'
 import { makeFakes } from './fakes.js'
 
 const mk = (over: Partial<TimedEventDefinition> = {}): TimedEventDefinition => ({
@@ -46,6 +47,16 @@ describe('POST /v1/events — timed-event multiplier wiring', () => {
     const json = await res.json()
     expect(json.progress).toContainEqual({ achievementId: 'a1', current: 1, target: 2 })
     expect(json.unlocks).toEqual([])
+  })
+  it('logs the timed-events fetch failure via a child logger carrying the request id', async () => {
+    const fakes = makeFakes(defs, auth, [], [])
+    fakes.configStore.getTimedEvents = async () => { throw new Error('config plane down') }
+    const childSpy = vi.spyOn(logger, 'child')
+    const app = createApp(fakes)
+    const res = await app.request('/v1/events', { method: 'POST', headers, body: body('key_0003b') })
+    expect(res.status).toBe(200)
+    expect(childSpy).toHaveBeenCalledWith({ requestId: expect.any(String) })
+    childSpy.mockRestore()
   })
 })
 
