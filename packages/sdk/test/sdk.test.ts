@@ -345,6 +345,8 @@ describe('getLiveEvents', () => {
         multiplier: 2,
         secondsUntilStart: null,
         secondsUntilEnd: 604800,
+        recurrence: 'weekly',
+        nextOccurrenceStartsAt: '2026-07-13T00:00:00.000Z',
       }],
     }
     const fetchImpl = vi.fn().mockImplementation(() => ok(liveEventBody))
@@ -352,5 +354,44 @@ describe('getLiveEvents', () => {
     const events = await c.getLiveEvents()
     expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/events/live')
     expect(events).toEqual(liveEventBody.events)
+  })
+
+  it('defaults recurrence and nextOccurrenceStartsAt when an old-shape event omits them', async () => {
+    const liveEventBody = {
+      events: [{
+        eventId: 'evt_live_2',
+        name: 'Legacy Sale',
+        description: null,
+        state: 'live',
+        startsAt: '2026-07-06T00:00:00.000Z',
+        endsAt: '2026-07-13T00:00:00.000Z',
+        multiplier: 2,
+        secondsUntilStart: null,
+        secondsUntilEnd: 604800,
+      }],
+    }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(liveEventBody))
+    const c = client(fetchImpl)
+    const events = await c.getLiveEvents()
+    expect(events).toEqual([{ ...liveEventBody.events[0], recurrence: 'none', nextOccurrenceStartsAt: null }])
+  })
+})
+
+describe('backfillAchievement', () => {
+  const backfillOk = { usersEvaluated: 12, progressRaised: 5, unlocksGranted: 2, pointsAwarded: 40 }
+  it('throws when no secretKey is configured', async () => {
+    const c = client(vi.fn())
+    await expect(c.backfillAchievement('ach_1')).rejects.toThrow('backfillAchievement requires the secretKey option (server-side only).')
+  })
+  it('sends the secretKey as bearer auth to the encoded path with no body and parses the response', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(backfillOk))
+    const c = client(fetchImpl, { secretKey: 'sk_test_x' })
+    const result = await c.backfillAchievement('ach 1/2')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://api.test/v1/achievements/ach%201%2F2/backfill')
+    expect(init.method).toBe('POST')
+    expect(init.headers.authorization).toBe('Bearer sk_test_x')
+    expect(init.body).toBeUndefined()
+    expect(result).toEqual(backfillOk)
   })
 })
