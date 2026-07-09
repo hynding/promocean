@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Promocean } from '../src/index.js'
+import { Promocean, PromoceanApiError } from '../src/index.js'
 
 const trackOk = { deduped: false, unlocks: [{ achievementId: 'a1', name: 'First Lesson', unlockedAt: '2026-07-06T00:00:00.000Z' }], progress: [] }
 const ok = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
@@ -244,6 +244,91 @@ describe('currentUserId', () => {
     const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
     c.identify('u2')
     expect(c.currentUserId).toBe('u2')
+  })
+})
+
+describe('listRewards', () => {
+  const rewardsBody = {
+    rewards: [{
+      slug: 'free-month', name: 'Free Month', description: null, codeType: 'generated',
+      pointsPrice: 500, startsAt: null, endsAt: null, perUserLimit: 1, inventory: null, remaining: null,
+    }],
+  }
+  it('fetches and parses the reward catalog without requiring an identified user', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(rewardsBody))
+    const c = new Promocean({ publishableKey: 'pk_test_x', baseUrl: 'http://api.test', fetchImpl })
+    const rewards = await c.listRewards()
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/rewards')
+    expect(rewards).toEqual(rewardsBody.rewards)
+  })
+})
+
+describe('claimReward', () => {
+  const claimOk = { code: 'ABC123', rewardSlug: 'free-month', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 500 }
+  it('throws if no user identified', async () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    await expect(c.claimReward('free-month')).rejects.toThrow('No user identified — call identify(userId) first.')
+  })
+  it('POSTs { userId } to the claim endpoint and parses the response', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(claimOk))
+    const c = client(fetchImpl)
+    const claimed = await c.claimReward('free-month')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://api.test/v1/rewards/free-month/claim')
+    expect(JSON.parse(init.body)).toEqual({ userId: 'u1' })
+    expect(claimed).toEqual(claimOk)
+  })
+  it('url-encodes the slug', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(claimOk))
+    const c = client(fetchImpl)
+    await c.claimReward('free month/deal')
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/rewards/free%20month%2Fdeal/claim')
+  })
+  it('propagates a 409 insufficient_points envelope as a typed PromoceanApiError', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ error: { code: 'insufficient_points', message: 'Insufficient points balance to claim this reward.' } }), { status: 409 }),
+    ))
+    const c = client(fetchImpl)
+    const err = await c.claimReward('free-month').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(PromoceanApiError)
+    expect((err as PromoceanApiError).code).toBe('insufficient_points')
+    expect((err as PromoceanApiError).status).toBe(409)
+  })
+})
+
+describe('validateCoupon', () => {
+  const validateOk = { valid: true, rewardSlug: 'free-month', status: 'claimed' }
+  it('throws when no secretKey is configured', async () => {
+    const c = client(vi.fn())
+    await expect(c.validateCoupon('ABC123')).rejects.toThrow('validateCoupon requires the secretKey option (server-side only).')
+  })
+  it('sends the secretKey as bearer auth with a { code } body and parses the response', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(validateOk))
+    const c = client(fetchImpl, { secretKey: 'sk_test_x' })
+    const result = await c.validateCoupon('ABC123')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://api.test/v1/coupons/validate')
+    expect(init.headers.authorization).toBe('Bearer sk_test_x')
+    expect(JSON.parse(init.body)).toEqual({ code: 'ABC123' })
+    expect(result).toEqual(validateOk)
+  })
+})
+
+describe('redeemCoupon', () => {
+  const redeemOk = { redeemed: true, rewardSlug: 'free-month', redeemedAt: '2026-07-06T00:00:00.000Z' }
+  it('throws when no secretKey is configured', async () => {
+    const c = client(vi.fn())
+    await expect(c.redeemCoupon('ABC123')).rejects.toThrow('redeemCoupon requires the secretKey option (server-side only).')
+  })
+  it('sends the secretKey as bearer auth with a { code } body and parses the response', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(redeemOk))
+    const c = client(fetchImpl, { secretKey: 'sk_test_x' })
+    const result = await c.redeemCoupon('ABC123')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(String(url)).toBe('http://api.test/v1/coupons/redeem')
+    expect(init.headers.authorization).toBe('Bearer sk_test_x')
+    expect(JSON.parse(init.body)).toEqual({ code: 'ABC123' })
+    expect(result).toEqual(redeemOk)
   })
 })
 

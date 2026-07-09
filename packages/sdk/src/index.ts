@@ -1,9 +1,11 @@
 import {
   trackEventResponseSchema, userAchievementsResponseSchema, placementOfferResponseSchema,
   liveEventsResponseSchema, statsResponseSchema, walletResponseSchema, streakResponseSchema,
-  leaderboardResponseSchema,
+  leaderboardResponseSchema, rewardsResponseSchema, claimRewardResponseSchema,
+  validateCouponResponseSchema, redeemCouponResponseSchema,
   type AchievementStatus, type TrackEventResponse, type UnlockPayload, type OfferCreative, type LiveTimedEvent,
   type StatsResponse, type WalletResponse, type StreakResponse, type LeaderboardResponse,
+  type Reward, type ClaimRewardResponse, type ValidateCouponResponse, type RedeemCouponResponse,
 } from '@promocean/contracts'
 
 export interface PromoceanOptions {
@@ -164,6 +166,38 @@ export class Promocean {
     const qs = params.size > 0 ? `?${params.toString()}` : ''
     const res = await this.request(`/v1/stats${qs}`, undefined, { useSecretKey: true })
     return statsResponseSchema.parse(await res.json())
+  }
+
+  async listRewards(): Promise<Reward[]> {
+    const res = await this.request('/v1/rewards')
+    return rewardsResponseSchema.parse(await res.json()).rewards
+  }
+
+  async claimReward(slug: string): Promise<ClaimRewardResponse> {
+    if (!this.userId) throw new Error('No user identified — call identify(userId) first.')
+    const res = await this.request(`/v1/rewards/${encodeURIComponent(slug)}/claim`, {
+      method: 'POST',
+      body: JSON.stringify({ userId: this.userId }),
+    })
+    return claimRewardResponseSchema.parse(await res.json())
+  }
+
+  async validateCoupon(code: string): Promise<ValidateCouponResponse> {
+    if (!this.opts.secretKey) throw new Error('validateCoupon requires the secretKey option (server-side only).')
+    const res = await this.request('/v1/coupons/validate', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }, { useSecretKey: true })
+    return validateCouponResponseSchema.parse(await res.json())
+  }
+
+  async redeemCoupon(code: string): Promise<RedeemCouponResponse> {
+    if (!this.opts.secretKey) throw new Error('redeemCoupon requires the secretKey option (server-side only).')
+    const res = await this.request('/v1/coupons/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }, { useSecretKey: true })
+    return redeemCouponResponseSchema.parse(await res.json())
   }
 
   private dismissalKey(offerId: string) { return `promocean:dismissed:${offerId}` }
