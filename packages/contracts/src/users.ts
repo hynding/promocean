@@ -9,6 +9,7 @@ export const eraseUserResponseSchema = z.object({
     offerEvents: z.number().int(),
     pointsLedger: z.number().int(),
     streaks: z.number().int(),
+    coupons: z.number().int(),
   }),
 })
 export type EraseUserResponse = z.infer<typeof eraseUserResponseSchema>

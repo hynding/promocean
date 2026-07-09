@@ -5,7 +5,7 @@ export const walletResponseSchema = z.object({
   recent: z.array(
     z.object({
       delta: z.number().int(),
-      source: z.enum(['event', 'unlock']),
+      source: z.enum(['event', 'unlock', 'redemption']),
       sourceRef: z.string(),
       at: z.iso.datetime(),
     }),

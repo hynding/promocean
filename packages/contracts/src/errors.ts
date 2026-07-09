@@ -9,6 +9,10 @@ export const errorCodeSchema = z.enum([
   'not_found',
   'internal_error',
   'unregistered_event_type',
+  'reward_unavailable',
+  'claim_limit_reached',
+  'insufficient_points',
+  'already_redeemed',
 ])
 export type ErrorCode = z.infer<typeof errorCodeSchema>
 
