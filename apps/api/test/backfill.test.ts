@@ -39,7 +39,7 @@ describe('POST /v1/achievements/:id/backfill', () => {
   it('happy path passes the resolved definition to the store and maps the summary verbatim', async () => {
     const def = achievement({ id: 'a1', eventType: 'purchase', targetCount: 5 })
     const { app, fakes } = setup(skAuth(), [def])
-    fakes.setBackfillResult({ usersEvaluated: 42, progressRaised: 10, unlocksGranted: 3, pointsAwarded: 30 })
+    fakes.setBackfillResult({ ok: true, usersEvaluated: 42, progressRaised: 10, unlocksGranted: 3, pointsAwarded: 30 })
     const res = await app.request('/v1/achievements/a1/backfill', { method: 'POST', headers })
     expect(res.status).toBe(200)
     const json = await res.json()
@@ -47,5 +47,13 @@ describe('POST /v1/achievements/:id/backfill', () => {
     expect(fakes.backfillCalls).toHaveLength(1)
     expect(fakes.backfillCalls[0].scope).toEqual({ projectId: 'p1', environment: 'test' })
     expect(fakes.backfillCalls[0].def).toEqual(def)
+  })
+
+  it('concurrent backfill conflict -> 409 backfill_in_progress', async () => {
+    const { app, fakes } = setup(skAuth(), [achievement({ id: 'a1' })])
+    fakes.setBackfillResult({ ok: false, reason: 'backfill_in_progress' })
+    const res = await app.request('/v1/achievements/a1/backfill', { method: 'POST', headers })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error.code).toBe('backfill_in_progress')
   })
 })

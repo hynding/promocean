@@ -26,7 +26,16 @@ export function achievementsRoute(deps: AppDeps) {
     if (!def) {
       return c.json({ error: { code: 'not_found', message: 'Unknown achievement id.' } }, 404)
     }
-    const summary = await deps.backfillStore.backfillAchievement(scope, def)
+    const result = await deps.backfillStore.backfillAchievement(scope, def)
+    if (!result.ok) {
+      return c.json({ error: { code: 'backfill_in_progress', message: 'A backfill for this achievement is already running.' } }, 409)
+    }
+    const summary: BackfillResponse = {
+      usersEvaluated: result.usersEvaluated,
+      progressRaised: result.progressRaised,
+      unlocksGranted: result.unlocksGranted,
+      pointsAwarded: result.pointsAwarded,
+    }
     return c.json(summary satisfies BackfillResponse)
   })
 

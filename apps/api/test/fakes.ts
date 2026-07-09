@@ -177,7 +177,7 @@ export function makeFakes(
   const setRedeemResult = (r: RedeemCouponResult) => { redeemResult = r }
 
   type BackfillResult = Awaited<ReturnType<BackfillStore['backfillAchievement']>>
-  let backfillResult: BackfillResult = { usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 }
+  let backfillResult: BackfillResult = { ok: true, usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 }
   const backfillCalls: Array<{ scope: Scope; def: AchievementDefinition }> = []
   const backfillStore: BackfillStore = {
     backfillAchievement: async (scope, def) => {

@@ -394,4 +394,14 @@ describe('backfillAchievement', () => {
     expect(init.body).toBeUndefined()
     expect(result).toEqual(backfillOk)
   })
+  it('propagates a 409 backfill_in_progress envelope as a typed PromoceanApiError', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ error: { code: 'backfill_in_progress', message: 'A backfill for this achievement is already running.' } }), { status: 409 }),
+    ))
+    const c = client(fetchImpl, { secretKey: 'sk_test_x' })
+    const err = await c.backfillAchievement('ach_1').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(PromoceanApiError)
+    expect((err as PromoceanApiError).code).toBe('backfill_in_progress')
+    expect((err as PromoceanApiError).status).toBe(409)
+  })
 })

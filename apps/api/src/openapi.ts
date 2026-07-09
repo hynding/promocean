@@ -339,6 +339,10 @@ export function buildOpenApiDocument(version: string) {
             description: 'No achievement exists with this id.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
           },
+          '409': {
+            description: 'backfill_in_progress: a backfill for this achievement is already running.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
+          },
           default: errorResponse,
         },
       },

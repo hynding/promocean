@@ -11,6 +11,15 @@ let ingest: PgIngestionStore
 const scope: Scope = { projectId: 'p1', environment: 'test' }
 const noEngagement: EngagementWrite = { localDay: '2026-07-01', eventPoints: null, unlockPoints: {} }
 
+// backfillAchievement now returns a union — narrow to the success branch (throwing if it
+// unexpectedly returned the conflict) so the property-level assertions below stay ergonomic.
+type BackfillResult = Awaited<ReturnType<PgBackfillStore['backfillAchievement']>>
+type BackfillOk = Extract<BackfillResult, { ok: true }>
+const expectOk = (r: BackfillResult): BackfillOk => {
+  if (!r.ok) throw new Error(`expected ok backfill result, got ${r.reason}`)
+  return r
+}
+
 const makeDef = (over: Partial<AchievementDefinition> & Pick<AchievementDefinition, 'id' | 'eventType'>): AchievementDefinition => ({
   name: over.id,
   description: null,
@@ -74,7 +83,7 @@ describe('PgBackfillStore.backfillAchievement', () => {
     const def = makeDef({ id: 'ret-ach', eventType: 'ret_lesson', targetCount: 3, pointsValue: 50 })
 
     const summary = await backfill.backfillAchievement(scope, def)
-    expect(summary).toEqual({ usersEvaluated: 2, progressRaised: 2, unlocksGranted: 1, pointsAwarded: 50 })
+    expect(summary).toEqual({ ok: true, usersEvaluated: 2, progressRaised: 2, unlocksGranted: 1, pointsAwarded: 50 })
 
     expect(await progressCurrent(scope, 'ret-A', 'ret-ach')).toBe(3) // clamped at target
     expect(await progressCurrent(scope, 'ret-B', 'ret-ach')).toBe(2)
@@ -91,7 +100,7 @@ describe('PgBackfillStore.backfillAchievement', () => {
     const def = makeDef({ id: 'ret-ach', eventType: 'ret_lesson', targetCount: 3, pointsValue: 50 })
     const ledgerBefore = await totalLedgerRows(scope)
 
-    const summary = await backfill.backfillAchievement(scope, def)
+    const summary = expectOk(await backfill.backfillAchievement(scope, def))
     // usersEvaluated still reflects the population; every DELTA is zero.
     expect(summary.progressRaised).toBe(0)
     expect(summary.unlocksGranted).toBe(0)
@@ -110,7 +119,7 @@ describe('PgBackfillStore.backfillAchievement', () => {
     )
     const def = makeDef({ id: 'gr-ach', eventType: 'gr_type', targetCount: 10, pointsValue: 100 })
 
-    const summary = await backfill.backfillAchievement(scope, def)
+    const summary = expectOk(await backfill.backfillAchievement(scope, def))
     expect(summary.progressRaised).toBe(0)
     expect(summary.unlocksGranted).toBe(0)
     expect(await progressCurrent(scope, 'gr-U', 'gr-ach')).toBe(8) // stays 8, not lowered to 3
@@ -133,7 +142,7 @@ describe('PgBackfillStore.backfillAchievement', () => {
       [scope.projectId, scope.environment],
     )
 
-    const summary = await backfill.backfillAchievement(scope, def)
+    const summary = expectOk(await backfill.backfillAchievement(scope, def))
     expect(summary.progressRaised).toBe(0)
     expect(summary.unlocksGranted).toBe(0)
     expect(summary.pointsAwarded).toBe(0)
@@ -170,7 +179,7 @@ describe('PgBackfillStore.backfillAchievement', () => {
   it('zero-event type: all-zero summary with no writes', async () => {
     const def = makeDef({ id: 'ze-ach', eventType: 'no_such_type', targetCount: 3, pointsValue: 10 })
     const summary = await backfill.backfillAchievement(scope, def)
-    expect(summary).toEqual({ usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 })
+    expect(summary).toEqual({ ok: true, usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 })
     const { rows } = await db.$client.query(
       `select count(*)::int as n from runtime.achievement_progress where project_id=$1 and environment=$2 and achievement_id='ze-ach'`,
       [scope.projectId, scope.environment],
@@ -182,7 +191,7 @@ describe('PgBackfillStore.backfillAchievement', () => {
     await ingestBareEvents(scope, 'zp-U', 'zp_type', 3, 'zpU')
     const def = makeDef({ id: 'zp-ach', eventType: 'zp_type', targetCount: 3, pointsValue: 0 })
 
-    const summary = await backfill.backfillAchievement(scope, def)
+    const summary = expectOk(await backfill.backfillAchievement(scope, def))
     expect(summary.unlocksGranted).toBe(1)
     expect(summary.pointsAwarded).toBe(0)
     expect(await unlockCount(scope, 'zp-U', 'zp-ach')).toBe(1)
@@ -196,11 +205,41 @@ describe('PgBackfillStore.backfillAchievement', () => {
     const def = makeDef({ id: 'iso-ach', eventType: 'iso_type', targetCount: 3, pointsValue: 25 })
 
     const p2Summary = await backfill.backfillAchievement(p2, def)
-    expect(p2Summary).toEqual({ usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 })
+    expect(p2Summary).toEqual({ ok: true, usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 })
     expect(await unlockCount(p2, 'iso-U', 'iso-ach')).toBe(0)
 
     // p1's own backfill still works and is unaffected by the p2 run.
     const p1Summary = await backfill.backfillAchievement(scope, def)
-    expect(p1Summary).toEqual({ usersEvaluated: 1, progressRaised: 1, unlocksGranted: 1, pointsAwarded: 25 })
+    expect(p1Summary).toEqual({ ok: true, usersEvaluated: 1, progressRaised: 1, unlocksGranted: 1, pointsAwarded: 25 })
+  })
+
+  it('try-lock conflict: a concurrent backfill of the same achievement returns backfill_in_progress with no writes', async () => {
+    // Hold the achievement's advisory lock from a SEPARATE connection's open transaction, then
+    // call backfillAchievement — it must try-lock, fail, and bail without touching any rows.
+    await ingestBareEvents(scope, 'lk-U', 'lk_type', 4, 'lkU') // would unlock (target 3) if it ran
+    const def = makeDef({ id: 'lk-ach', eventType: 'lk_type', targetCount: 3, pointsValue: 30 })
+
+    const ns = `${scope.projectId}:${scope.environment}`
+    const holder = await db.$client.connect()
+    try {
+      await holder.query('BEGIN')
+      await holder.query(`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, [ns, `backfill:${def.id}`])
+
+      const result = await backfill.backfillAchievement(scope, def)
+      expect(result).toEqual({ ok: false, reason: 'backfill_in_progress' })
+
+      // No progress / unlock / ledger rows were written for the contended achievement.
+      expect(await progressCurrent(scope, 'lk-U', 'lk-ach')).toBeUndefined()
+      expect(await unlockCount(scope, 'lk-U', 'lk-ach')).toBe(0)
+      expect(await bonusLedgerCount(scope, 'lk-U', 'lk-ach')).toBe(0)
+    } finally {
+      await holder.query('ROLLBACK') // release the advisory lock
+      holder.release()
+    }
+
+    // Once the lock is released, a fresh backfill succeeds and grants the unlock.
+    const after = expectOk(await backfill.backfillAchievement(scope, def))
+    expect(after.unlocksGranted).toBe(1)
+    expect(await unlockCount(scope, 'lk-U', 'lk-ach')).toBe(1)
   })
 })

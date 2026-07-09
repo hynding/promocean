@@ -642,9 +642,11 @@ export class PgRewardStore implements RewardStore {
  * Retroactively applies an achievement definition against already-stored events — the path a
  * newly-created (or newly-eligible) achievement takes so historical activity counts toward it.
  *
- * The whole run is one transaction guarded by an advisory lock keyed on
- * (project+environment, 'backfill:' + def.id), so two concurrent backfills of the same definition
- * serialize. Live ingestion NEVER takes this lock — so a concurrent ingestEvent can race us. Two
+ * The whole run is one transaction guarded by a TRY advisory lock keyed on
+ * (project+environment, 'backfill:' + def.id): a concurrent backfill of the same definition does
+ * NOT queue on the lock (which would stack pool connections and starve DB-backed endpoints) —
+ * it returns { ok: false, reason: 'backfill_in_progress' } immediately and commits its empty
+ * transaction. Live ingestion NEVER takes this lock — so a concurrent ingestEvent can race us. Two
  * belts guard that race: the progress upsert wraps its target-clamped value in GREATEST so a
  * concurrent live increment is never lowered, and the unlock insert is onConflictDoNothing so only
  * one of {backfill, ingest} wins the row and writes the single unlock bonus.
@@ -654,7 +656,14 @@ export class PgBackfillStore implements BackfillStore {
   async backfillAchievement(scope: Scope, def: AchievementDefinition) {
     return this.db.transaction(async (tx) => {
       const ns = `${scope.projectId}:${scope.environment}`
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${ns}), hashtext(${'backfill:' + def.id}))`)
+      const [lockRow] = (await tx.execute<{ locked: boolean }>(
+        sql`SELECT pg_try_advisory_xact_lock(hashtext(${ns}), hashtext(${'backfill:' + def.id})) AS locked`,
+      )).rows
+      if (!lockRow?.locked) {
+        // Another backfill of this achievement holds the lock — bail without waiting. The empty
+        // transaction commits cleanly (nothing was written), leaving the running backfill alone.
+        return { ok: false as const, reason: 'backfill_in_progress' as const }
+      }
 
       const aggregate = await tx.execute<{ user_id: string; cnt: number }>(sql`
         SELECT user_id, COUNT(*)::int AS cnt
@@ -666,7 +675,7 @@ export class PgBackfillStore implements BackfillStore {
       const usersEvaluated = rows.length
       // Empty aggregate: nothing to evaluate, so return an all-zero summary without any writes.
       if (usersEvaluated === 0) {
-        return { usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 }
+        return { ok: true as const, usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 }
       }
 
       const userIds = rows.map((r) => r.user_id)
@@ -733,7 +742,7 @@ export class PgBackfillStore implements BackfillStore {
         }
       }
 
-      return { usersEvaluated, progressRaised, unlocksGranted, pointsAwarded }
+      return { ok: true as const, usersEvaluated, progressRaised, unlocksGranted, pointsAwarded }
     })
   }
 }

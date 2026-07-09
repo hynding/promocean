@@ -2,12 +2,16 @@ import type { ClaimRejection } from './rewards.js'
 import type { AchievementDefinition, AuthContext, OfferDefinition, PointRules, RewardDefinition, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
 
 export interface BackfillStore {
-  backfillAchievement(scope: Scope, def: AchievementDefinition): Promise<{
-    usersEvaluated: number
-    progressRaised: number
-    unlocksGranted: number
-    pointsAwarded: number
-  }>
+  /**
+   * Try-lock semantics: takes a `pg_try_advisory_xact_lock` on the achievement rather than
+   * queueing on it, so a concurrent backfill of the SAME achievement returns
+   * `{ ok: false, reason: 'backfill_in_progress' }` immediately instead of waiting on the lock
+   * while holding a pool connection (which would starve every DB-backed endpoint).
+   */
+  backfillAchievement(scope: Scope, def: AchievementDefinition): Promise<
+    | { ok: true; usersEvaluated: number; progressRaised: number; unlocksGranted: number; pointsAwarded: number }
+    | { ok: false; reason: 'backfill_in_progress' }
+  >
 }
 
 export interface ConfigStore {

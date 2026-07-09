@@ -18,7 +18,10 @@ backfill.
   all historical events of its `eventType`, returning `{ usersEvaluated,
   progressRaised, unlocksGranted, pointsAwarded }`. A retroactive unlock
   pays out its `pointsValue` bonus exactly like a live one — see the root
-  README for the full operator flow.
+  README for the full operator flow. The error catalog gains a
+  `backfill_in_progress` code (surfaced as `409` when a backfill of the same
+  achievement is already running — the endpoint try-locks rather than
+  queueing).
 - Webhook payloads for recurring timed-event transitions gain an additive
   `data.occurrence: { startsAt, endsAt }` field (the specific occurrence
   that fired); `data.startsAt`/`data.endsAt` stay the definition's own

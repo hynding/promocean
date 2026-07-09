@@ -81,6 +81,12 @@ history, so a `usersEvaluated: 5, unlocksGranted: 0, pointsAwarded: 0`
 result is the expected, correct output of a re-run against unchanged data —
 not a failure.
 
+**One at a time per achievement:** a backfill takes a try-lock on its
+achievement rather than queueing, so a second concurrent backfill of the
+*same* achievement returns `409 backfill_in_progress` immediately (it does
+not wait, and writes nothing) — retry once the running backfill finishes.
+Backfills of *different* achievements run concurrently without contending.
+
 ## Quickstart
 
 The fastest way to see the whole thing working — clone, then one command:
@@ -213,8 +219,8 @@ middleware so tooling can fetch the spec without a key.
 | POST | `/v1/rewards/:slug/claim` | pk or sk | Claim a reward for a user, returning its coupon code. Rejected with `404 not_found` for an unknown slug, or `409` `reward_unavailable` / `claim_limit_reached` / `insufficient_points` when the reward, per-user limit, or points balance rules aren't met. |
 | POST | `/v1/coupons/validate` | sk only | Look up a coupon code without redeeming it: `{ valid, rewardSlug?, status?, reason? }`. Rejected with `403 forbidden` for publishable keys. |
 | POST | `/v1/coupons/redeem` | sk only | Redeem a coupon code (one-time). Rejected with `409 already_redeemed` on a second redemption, `409 reward_unavailable` if the reward has since expired, or `404 not_found` for an unknown code. Rejected with `403 forbidden` for publishable keys. |
-| GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. Rejected with `403 forbidden` for publishable keys. |
-| POST | `/v1/achievements/:id/backfill` | sk only | Retroactively recompute progress/unlocks/points for an achievement against all historical events of its `eventType` — see "Retroactive achievement backfill" above. Rejected with `403 forbidden` for publishable keys, `404 not_found` for an unknown achievement id. |
+| GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. A timed event appears in the stats breakdown only when one of its participation windows intersects the queried range (changed in Sprint 9 — previously out-of-range events appeared zero-filled). Rejected with `403 forbidden` for publishable keys. |
+| POST | `/v1/achievements/:id/backfill` | sk only | Retroactively recompute progress/unlocks/points for an achievement against all historical events of its `eventType` — see "Retroactive achievement backfill" above. Rejected with `403 forbidden` for publishable keys, `404 not_found` for an unknown achievement id, or `409 backfill_in_progress` when another backfill of the same achievement is already running. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
 | GET | `/docs` | none | Serve an HTML API reference (Redoc) rendered from the same OpenAPI document. |
 

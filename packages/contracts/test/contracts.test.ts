@@ -215,6 +215,10 @@ describe('error codes', () => {
       expect(result.success).toBe(true)
     }
   })
+  it('accepts the backfill_in_progress error code', () => {
+    const result = errorEnvelopeSchema.safeParse({ error: { code: 'backfill_in_progress', message: 'x' } })
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('webhookMessageSchema', () => {
