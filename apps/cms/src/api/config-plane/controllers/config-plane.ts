@@ -74,18 +74,29 @@ export default {
         endingSoonMinutes: r.endingSoonMinutes,
         multiplier: r.multiplier,
         enabled: r.enabled,
+        recurrence: r.recurrence ?? 'none',
+        recurrenceEndsAt: r.recurrenceEndsAt ?? null,
       })),
     }
   },
   async timedEventsAll(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()
-    // ?endedWithinMinutes=<positive int>: excludes events with endsAt < now - N minutes.
-    // Absent or invalid (non-integer, zero, negative) -> unfiltered, for backward compatibility.
+    // ?endedWithinMinutes=<positive int>: excludes events with endsAt < now - N minutes —
+    // UNLESS the event is recurring and its recurrence hasn't ended yet (recurrenceEndsAt is
+    // null or still in the future). A months-old weekly event's occurrence-0 endsAt is ancient;
+    // without this OR-branch the scheduler would never see it again. Absent or invalid
+    // (non-integer, zero, negative) endedWithinMinutes -> unfiltered, for backward compatibility.
     const rawParam = String(ctx.query.endedWithinMinutes ?? '')
     const filters: Record<string, unknown> = {}
     if (/^[1-9][0-9]*$/.test(rawParam)) {
-      const cutoff = new Date(Date.now() - Number(rawParam) * 60_000)
-      filters.endsAt = { $gte: cutoff.toISOString() }
+      const cutoff = new Date(Date.now() - Number(rawParam) * 60_000).toISOString()
+      filters.$or = [
+        { endsAt: { $gte: cutoff } },
+        {
+          recurrence: { $ne: 'none' },
+          $or: [{ recurrenceEndsAt: { $null: true } }, { recurrenceEndsAt: { $gte: cutoff } }],
+        },
+      ]
     }
     const rows = await strapi.documents('api::timed-event.timed-event').findMany({
       filters,
@@ -103,6 +114,8 @@ export default {
           endingSoonMinutes: r.endingSoonMinutes,
           multiplier: r.multiplier,
           enabled: r.enabled,
+          recurrence: r.recurrence ?? 'none',
+          recurrenceEndsAt: r.recurrenceEndsAt ?? null,
           projectId: r.project.documentId,
         })),
     }

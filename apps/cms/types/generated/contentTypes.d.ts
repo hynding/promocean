@@ -744,7 +744,12 @@ export interface ApiTimedEventTimedEvent extends Struct.CollectionTypeSchema {
     name: Schema.Attribute.String & Schema.Attribute.Required;
     project: Schema.Attribute.Relation<'manyToOne', 'api::project.project'>;
     publishedAt: Schema.Attribute.DateTime;
-    recurrence: Schema.Attribute.JSON;
+    recurrence: Schema.Attribute.Enumeration<
+      ['none', 'daily', 'weekly', 'monthly']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'none'>;
+    recurrenceEndsAt: Schema.Attribute.DateTime;
     startsAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

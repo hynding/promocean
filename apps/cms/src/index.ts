@@ -100,6 +100,22 @@ export default {
         project: project.documentId,
       },
     })
+    const happyHourStartsAt = new Date(Date.now())
+    happyHourStartsAt.setUTCHours(17, 0, 0, 0)
+    await strapi.documents('api::timed-event.timed-event').create({
+      data: {
+        name: 'Weekly Happy Hour',
+        description: 'A recurring window of double points every week.',
+        startsAt: happyHourStartsAt,
+        endsAt: new Date(happyHourStartsAt.getTime() + 2 * 3600_000),
+        endingSoonMinutes: 30,
+        multiplier: 2,
+        enabled: true,
+        recurrence: 'weekly',
+        recurrenceEndsAt: null,
+        project: project.documentId,
+      },
+    })
     const rewards = [
       {
         slug: 'welcome_coupon',
