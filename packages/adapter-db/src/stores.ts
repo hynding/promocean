@@ -1,10 +1,31 @@
-import { and, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
-import type { ErasureStore, EventStore, IngestionStore, OfferMetricsStore, ProgressStore, Scope, StatsStore, TimedEventTransition, UsageStore, WebhookDeliveryStore } from '@promocean/core'
-import { achievementProgress, events, monthlyActiveUsers, offerEvents, timedEventNotifications, unlocks, usageCounters, webhookDeadLetters } from './schema.js'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
+import { applyStreak, type EngagementStore, type EngagementWrite, type ErasureStore, type EventStore, type IngestionStore, type OfferMetricsStore, type ProgressStore, type Scope, type StatsStore, type StreakState, type TimedEventTransition, type UsageStore, type WebhookDeliveryStore } from '@promocean/core'
+import { achievementProgress, events, monthlyActiveUsers, offerEvents, pointsLedger, timedEventNotifications, unlocks, usageCounters, userStreaks, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
 
 const scoped = (t: { projectId: any; environment: any }, s: Scope) =>
   and(eq(t.projectId, s.projectId), eq(t.environment, s.environment))
+
+/**
+ * Drizzle declares `last_active_day` in string mode, and the adapter's node-postgres session
+ * overrides pg's own DATE type parser to hand back the raw wire text (see
+ * drizzle-orm/node-postgres/session.js) — so in practice this column always arrives as a plain
+ * 'YYYY-MM-DD' string through drizzle's query builder. We still normalize defensively here in
+ * case a Date instance ever reaches this path (e.g. a future raw-driver query), reading its
+ * *local* fields — Postgres date-only values are conventionally parsed as local time by
+ * node-postgres's own (bypassed-by-drizzle) date parser, so local fields are the correct ones
+ * to read back off a Date, not UTC fields.
+ */
+function normalizeDay(value: string | Date | null): string | null {
+  if (value === null) return null
+  if (value instanceof Date) {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  return value.slice(0, 10)
+}
 
 export class PgEventStore implements EventStore {
   constructor(private db: Db) {}
@@ -77,6 +98,7 @@ export class PgIngestionStore implements IngestionStore {
     event: { userId: string; type: string; idempotencyKey: string; occurredAt: Date; meta?: Record<string, unknown> },
     increments: { achievementId: string; delta: number; target: number }[],
     month: string,
+    engagement: EngagementWrite,
   ) {
     return this.db.transaction(async (tx) => {
       const insertedEvent = await tx.insert(events)
@@ -118,6 +140,57 @@ export class PgIngestionStore implements IngestionStore {
         if (insertedUnlock.length > 0) newUnlocks.push({ achievementId: p.achievementId, unlockedAt })
       }
 
+      if (engagement.eventPoints) {
+        await tx.insert(pointsLedger).values({
+          ...scope,
+          userId: event.userId,
+          delta: engagement.eventPoints.points,
+          source: 'event',
+          sourceRef: engagement.eventPoints.sourceRef,
+        })
+      }
+      for (const u of newUnlocks) {
+        const points = engagement.unlockPoints[u.achievementId]
+        if (!points || points <= 0) continue
+        await tx.insert(pointsLedger).values({
+          ...scope,
+          userId: event.userId,
+          delta: points,
+          source: 'unlock',
+          sourceRef: u.achievementId,
+        })
+      }
+
+      // Streak: ensure a row exists, then lock it for the duration of this tx so concurrent
+      // same-user ingests serialize through applyStreak rather than racing on a read-then-write.
+      await tx.insert(userStreaks)
+        .values({ ...scope, userId: event.userId, currentStreak: 0, longestStreak: 0, lastActiveDay: null })
+        .onConflictDoNothing()
+      const [streakRow] = await tx.select({
+        currentStreak: userStreaks.currentStreak,
+        longestStreak: userStreaks.longestStreak,
+        lastActiveDay: userStreaks.lastActiveDay,
+      })
+        .from(userStreaks)
+        .where(and(scoped(userStreaks, scope), eq(userStreaks.userId, event.userId)))
+        .for('update')
+      const prevStreak: StreakState = {
+        current: streakRow!.currentStreak,
+        longest: streakRow!.longestStreak,
+        lastActiveDay: normalizeDay(streakRow!.lastActiveDay),
+      }
+      const nextStreak = applyStreak(prevStreak, engagement.localDay)
+      if (nextStreak) {
+        await tx.update(userStreaks)
+          .set({
+            currentStreak: nextStreak.current,
+            longestStreak: nextStreak.longest,
+            lastActiveDay: nextStreak.lastActiveDay,
+            updatedAt: sql`now()`,
+          })
+          .where(and(scoped(userStreaks, scope), eq(userStreaks.userId, event.userId)))
+      }
+
       await tx.insert(monthlyActiveUsers).values({ ...scope, month, userId: event.userId }).onConflictDoNothing()
       await tx.insert(usageCounters).values({ ...scope, month, eventsCount: 1 })
         .onConflictDoUpdate({
@@ -127,6 +200,55 @@ export class PgIngestionStore implements IngestionStore {
 
       return { deduped: false as const, progress, newUnlocks }
     })
+  }
+}
+
+export class PgEngagementStore implements EngagementStore {
+  constructor(private db: Db) {}
+  async getWallet(scope: Scope, userId: string) {
+    const [balanceRow] = await this.db.select({ balance: sql<number>`COALESCE(SUM(${pointsLedger.delta}), 0)::int` })
+      .from(pointsLedger)
+      .where(and(scoped(pointsLedger, scope), eq(pointsLedger.userId, userId)))
+    const recentRows = await this.db.select({
+      delta: pointsLedger.delta,
+      source: pointsLedger.source,
+      sourceRef: pointsLedger.sourceRef,
+      at: pointsLedger.createdAt,
+    })
+      .from(pointsLedger)
+      .where(and(scoped(pointsLedger, scope), eq(pointsLedger.userId, userId)))
+      .orderBy(desc(pointsLedger.createdAt))
+      .limit(20)
+    return {
+      balance: balanceRow?.balance ?? 0,
+      recent: recentRows.map((r) => ({ delta: r.delta, source: r.source as 'event' | 'unlock', sourceRef: r.sourceRef, at: r.at })),
+    }
+  }
+  async getStreak(scope: Scope, userId: string) {
+    const [row] = await this.db.select({
+      currentStreak: userStreaks.currentStreak,
+      longestStreak: userStreaks.longestStreak,
+      lastActiveDay: userStreaks.lastActiveDay,
+    })
+      .from(userStreaks)
+      .where(and(scoped(userStreaks, scope), eq(userStreaks.userId, userId)))
+    if (!row) return { current: 0, longest: 0, lastActiveDay: null }
+    return { current: row.currentStreak, longest: row.longestStreak, lastActiveDay: normalizeDay(row.lastActiveDay) }
+  }
+  async getLeaderboard(scope: Scope, window: 'all' | '7d' | '30d', limit: number) {
+    const conds = [scoped(pointsLedger, scope)]
+    if (window === '7d') conds.push(sql`${pointsLedger.createdAt} >= now() - interval '7 days'`)
+    else if (window === '30d') conds.push(sql`${pointsLedger.createdAt} >= now() - interval '30 days'`)
+    const rows = await this.db.select({
+      userId: pointsLedger.userId,
+      points: sql<number>`SUM(${pointsLedger.delta})::int`,
+    })
+      .from(pointsLedger)
+      .where(and(...conds))
+      .groupBy(pointsLedger.userId)
+      .orderBy(sql`SUM(${pointsLedger.delta}) DESC`, asc(pointsLedger.userId))
+      .limit(limit)
+    return rows.map((r, i) => ({ rank: i + 1, userId: r.userId, points: r.points }))
   }
 }
 

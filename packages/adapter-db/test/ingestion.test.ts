@@ -1,11 +1,12 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createDb, runMigrations, PgIngestionStore, type Db } from '../src/index.js'
-import type { Scope } from '@promocean/core'
+import type { EngagementWrite, Scope } from '@promocean/core'
 
 let container: StartedPostgreSqlContainer
 let db: Db
 const scope: Scope = { projectId: 'p1', environment: 'test' }
+const noEngagement: EngagementWrite = { localDay: '2026-07-01', eventPoints: null, unlockPoints: {} }
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:17').start()
@@ -48,12 +49,14 @@ describe('PgIngestionStore', () => {
         { userId: 'race-user', type: 'lesson_completed', idempotencyKey: 'race-1', occurredAt: at },
         [{ achievementId: 'a-race', delta: 1, target: 5 }],
         '2026-07',
+        noEngagement,
       ),
       store.ingestEvent(
         scope,
         { userId: 'race-user', type: 'lesson_completed', idempotencyKey: 'race-2', occurredAt: at },
         [{ achievementId: 'a-race', delta: 1, target: 5 }],
         '2026-07',
+        noEngagement,
       ),
     ])
     expect(await rawProgress('race-user', 'a-race')).toBe(2)
@@ -72,6 +75,7 @@ describe('PgIngestionStore', () => {
           { userId, type: 'lesson_completed', idempotencyKey: `race8-${i}`, occurredAt: at },
           [{ achievementId, delta: 1, target }],
           '2026-07',
+          noEngagement,
         ),
       ),
     )
@@ -90,6 +94,7 @@ describe('PgIngestionStore', () => {
       { userId, type: 'lesson_completed', idempotencyKey: 'unlock-1', occurredAt: at },
       [{ achievementId, delta: 1, target }],
       '2026-07',
+      noEngagement,
     )
     expect(r1).toEqual({ deduped: false, progress: [{ achievementId, current: 1, target }], newUnlocks: [] })
 
@@ -98,6 +103,7 @@ describe('PgIngestionStore', () => {
       { userId, type: 'lesson_completed', idempotencyKey: 'unlock-2', occurredAt: at },
       [{ achievementId, delta: 1, target }],
       '2026-07',
+      noEngagement,
     )
     expect(r2.deduped).toBe(false)
     if (!r2.deduped) expect(r2.newUnlocks).toEqual([])
@@ -108,6 +114,7 @@ describe('PgIngestionStore', () => {
       { userId, type: 'lesson_completed', idempotencyKey: 'unlock-3', occurredAt: at },
       [{ achievementId, delta: 1, target }],
       '2026-07',
+      noEngagement,
     )
     expect(r3.deduped).toBe(false)
     if (!r3.deduped) {
@@ -124,6 +131,7 @@ describe('PgIngestionStore', () => {
       { userId, type: 'lesson_completed', idempotencyKey: 'unlock-4', occurredAt: at },
       [{ achievementId, delta: 1, target }],
       '2026-07',
+      noEngagement,
     )
     expect(r4.deduped).toBe(false)
     if (!r4.deduped) expect(r4.newUnlocks).toEqual([])
@@ -143,6 +151,7 @@ describe('PgIngestionStore', () => {
         { userId, type: 'lesson_completed', idempotencyKey, occurredAt: at },
         [{ achievementId, delta: Number.NaN, target: 5 }],
         '2026-07',
+        noEngagement,
       ),
     ).rejects.toThrow()
 
@@ -156,6 +165,7 @@ describe('PgIngestionStore', () => {
       { userId, type: 'lesson_completed', idempotencyKey, occurredAt: at },
       [{ achievementId, delta: 1, target: 5 }],
       '2026-07',
+      noEngagement,
     )
     expect(retry).toEqual({ deduped: false, progress: [{ achievementId, current: 1, target: 5 }], newUnlocks: [] })
     expect(await rawEventCount(idempotencyKey)).toBe(1)
@@ -173,6 +183,7 @@ describe('PgIngestionStore', () => {
       { userId, type: 'lesson_completed', idempotencyKey, occurredAt: at },
       [{ achievementId, delta: 1, target: 5 }],
       '2026-07',
+      noEngagement,
     )
     expect(first.deduped).toBe(false)
 
@@ -181,6 +192,7 @@ describe('PgIngestionStore', () => {
       { userId, type: 'lesson_completed', idempotencyKey, occurredAt: at },
       [{ achievementId, delta: 1, target: 5 }],
       '2026-07',
+      noEngagement,
     )
     expect(second).toEqual({ deduped: true })
     expect(await rawProgress(userId, achievementId)).toBe(1)

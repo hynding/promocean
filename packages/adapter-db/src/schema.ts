@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { date, index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 export const runtime = pgSchema('runtime')
 
@@ -85,3 +85,29 @@ export const webhookDeadLetters = runtime.table('webhook_dead_letters', {
   error: text('error').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
 })
+
+export const pointsLedger = runtime.table('points_ledger', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: text('project_id').notNull(),
+  environment: text('environment').notNull(),
+  userId: text('user_id').notNull(),
+  delta: integer('delta').notNull(),
+  source: text('source').notNull(),
+  sourceRef: text('source_ref').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index('points_ledger_user_ix').on(t.projectId, t.environment, t.userId),
+  index('points_ledger_window_ix').on(t.projectId, t.environment, t.createdAt),
+])
+
+export const userStreaks = runtime.table('user_streaks', {
+  projectId: text('project_id').notNull(),
+  environment: text('environment').notNull(),
+  userId: text('user_id').notNull(),
+  currentStreak: integer('current_streak').notNull().default(0),
+  longestStreak: integer('longest_streak').notNull().default(0),
+  lastActiveDay: date('last_active_day'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('user_streaks_uq').on(t.projectId, t.environment, t.userId),
+])

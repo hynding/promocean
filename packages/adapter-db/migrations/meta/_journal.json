@@ -43,6 +43,13 @@
       "when": 1783566180718,
       "tag": "0005_backfill_delivered_at",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783571666825,
+      "tag": "0006_warm_centennial",
+      "breakpoints": true
     }
   ]
 }
