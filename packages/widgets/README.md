@@ -21,6 +21,7 @@ import {
   Placement,
   EventCountdown,
   Leaderboard,
+  RewardsStore,
 } from '@promocean/widgets'
 
 const client = new Promocean({
@@ -50,6 +51,9 @@ export function App() {
 
       {/* Top 5 users by points, highlighting the identified user's row */}
       <Leaderboard limit={5} title="Top learners" />
+
+      {/* Points-redeemable reward catalog with inline claim + code reveal */}
+      <RewardsStore title="Rewards" />
     </PromoceanProvider>
   )
 }
@@ -126,6 +130,36 @@ reflect points awarded during the current page session.
 the SDK README's privacy note before rendering this with identifying user
 ids.
 
+### `<RewardsStore title? />`
+
+Renders the identified user's claimable reward catalog: name, description,
+price (`Free` or `N pts`), remaining inventory when the reward is capped,
+and a claim button. Fetches `client.listRewards()` + `client.getWallet()`
+once on mount (same fetch-once contract as `<Leaderboard/>` — remount it,
+e.g. via a `key` you bump after a `track()` call, if you need the shown
+balance/claim-eligibility to reflect points earned during the current
+session). Renders nothing until a user is identified.
+
+Claiming a reward calls `client.claimReward(slug)`; on success the coupon
+code is shown inline (with a **Copy** button, `navigator.clipboard`) and
+the reward list + wallet balance are re-fetched. **The claim button always
+stays visible after a successful claim** — a reward's `perUserLimit` can be
+greater than 1, and only the server knows a user's actual claim count, so
+the widget never forecloses a legitimate repeat claim itself; a claim past
+the limit simply comes back as the `claim_limit_reached` error below. The
+button is disabled and reads:
+
+- **Not enough points** — `pointsPrice` exceeds the wallet balance.
+- **Sold out** — `remaining === 0` (checked before the points check: a
+  reward that's both out of stock and unaffordable reads as sold out,
+  since restocking wouldn't help either way).
+- **Claiming…** — a claim request is in flight (prevents a double-claim).
+
+A rejected claim (`insufficient_points`, `claim_limit_reached`,
+`reward_unavailable` — all `409`, or any other `PromoceanApiError`) renders
+its mapped message in a `role="alert"` element under that reward's button;
+the previously shown code (if any) stays visible.
+
 ## SSR
 
 All widgets are safe to import in an SSR context (e.g. Next.js App Router;
@@ -144,5 +178,7 @@ out of the box with zero build-tool configuration. There's no theming API
 yet — if you need different visuals, either override with your own CSS
 targeting the `data-promocean-*` attributes (`[data-promocean-placement]`,
 `[data-promocean-event]`, `[data-promocean-leaderboard]`,
-`[data-promocean-current-user]`, `[data-locked]` on badge list items) or
+`[data-promocean-current-user]`, `[data-locked]` on badge list items,
+`[data-promocean-rewards]`, `[data-promocean-reward="<slug>"]` on each
+reward's list item) or
 compose your own UI directly against `@promocean/sdk` and `usePromocean()`.
