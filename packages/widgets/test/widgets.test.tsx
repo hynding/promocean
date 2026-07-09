@@ -329,10 +329,10 @@ describe('RewardsStore', () => {
     expect(client.getWallet).not.toHaveBeenCalled()
   })
 
-  it('claiming a reward shows the code inline and refetches wallet + rewards', async () => {
+  it('claiming a reward shows the code inline, keeps the claim button, and refetches wallet + rewards', async () => {
     const { client } = fakeClient()
     client.currentUserId = 'u1'
-    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.listRewards = vi.fn().mockResolvedValue([reward({ perUserLimit: 5 })])
     client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
     client.claimReward = vi.fn().mockResolvedValue({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
     render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
@@ -342,6 +342,46 @@ describe('RewardsStore', () => {
     expect(client.claimReward).toHaveBeenCalledWith('r1')
     expect(client.listRewards).toHaveBeenCalledTimes(2)
     expect(client.getWallet).toHaveBeenCalledTimes(2)
+    // A reward with perUserLimit > 1 must still offer the claim button after
+    // a successful claim — the widget can't know the user's claim count, so
+    // it can't foreclose legitimate repeat claims itself.
+    expect(screen.getByRole('button', { name: 'Claim' })).not.toBeDisabled()
+  })
+
+  it('a repeat claim rejected as claim_limit_reached renders the mapped message while the prior code stays visible', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward({ perUserLimit: 5 })])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn()
+      .mockResolvedValueOnce({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
+      .mockRejectedValueOnce(new PromoceanApiError('claim_limit_reached', 'limit reached', 409))
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByText('ABC-123')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Claim limit reached'))
+    expect(screen.getByText('ABC-123')).toBeDefined()
+    expect(client.claimReward).toHaveBeenCalledTimes(2)
+  })
+
+  it('a second successful claim replaces the shown code with the new one', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward({ perUserLimit: 5 })])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn()
+      .mockResolvedValueOnce({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
+      .mockResolvedValueOnce({ code: 'DEF-456', rewardSlug: 'r1', claimedAt: '2026-07-06T00:05:00.000Z', pointsSpent: 100 })
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByText('ABC-123')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByText('DEF-456')).toBeDefined())
+    expect(screen.queryByText('ABC-123')).toBeNull()
+    expect(client.claimReward).toHaveBeenCalledTimes(2)
   })
 
   it('disables the claim button while a claim is pending, preventing a double-claim', async () => {

@@ -89,6 +89,10 @@ export function RewardsStore({ title }: { title?: string }) {
           const claimedCode = claimedCodes[reward.slug]
           const claimError = claimErrors[reward.slug]
           const disabled = isPending || soldOut || insufficientPoints
+          // Sold-out is checked before not-enough-points deliberately: a reward
+          // that's both out of stock and outside the user's balance should read
+          // as "Sold out", since restocking wouldn't change the user's ability
+          // to claim it anyway, whereas earning more points would.
           const buttonLabel = isPending
             ? 'Claiming…'
             : soldOut
@@ -111,14 +115,18 @@ export function RewardsStore({ title }: { title?: string }) {
                   <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>{claimedCode}</code>
                   <button onClick={() => copyCode(claimedCode)}>Copy</button>
                 </div>
-              ) : (
-                <div style={{ marginTop: 8 }}>
-                  <button disabled={disabled} onClick={() => handleClaim(reward.slug)}>{buttonLabel}</button>
-                  {claimError ? (
-                    <div role="alert" style={{ fontSize: 13, color: '#b00020', marginTop: 4 }}>{claimError}</div>
-                  ) : null}
-                </div>
-              )}
+              ) : null}
+              {/* The claim button always stays available after a successful claim:
+                  perUserLimit can be > 1, and only the server knows the user's
+                  claim count, so the widget never hides repeat claims itself —
+                  a claim past the limit comes back as a 409 claim_limit_reached,
+                  handled below via the existing error mapping. */}
+              <div style={{ marginTop: 8 }}>
+                <button disabled={disabled} onClick={() => handleClaim(reward.slug)}>{buttonLabel}</button>
+                {claimError ? (
+                  <div role="alert" style={{ fontSize: 13, color: '#b00020', marginTop: 4 }}>{claimError}</div>
+                ) : null}
+              </div>
             </li>
           )
         })}
