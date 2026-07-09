@@ -49,6 +49,8 @@ const timedEventFieldsSchema = z.object({
   endingSoonMinutes: z.number().default(1440),
   multiplier: z.number().default(1),
   enabled: z.boolean(),
+  recurrence: z.enum(['none', 'daily', 'weekly', 'monthly']).default('none'),
+  recurrenceEndsAt: z.string().nullable().default(null),
 })
 
 export const timedEventsResponseSchema = z.object({
