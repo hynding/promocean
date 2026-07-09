@@ -1,8 +1,9 @@
 # @promocean/sdk
 
 Runtime client for the Promocean API — event tracking, achievement status,
-placement offers, and live timed events. Framework-agnostic; works in the
-browser or Node (18+ for global `fetch`/`crypto.randomUUID`).
+points/streaks/leaderboards, placement offers, and live timed events.
+Framework-agnostic; works in the browser or Node (18+ for global
+`fetch`/`crypto.randomUUID`).
 
 If you're building a React app, see
 [`@promocean/widgets`](../widgets/README.md) instead — it wraps this SDK in
@@ -31,6 +32,15 @@ const { unlocks, progress } = await promocean.track('lesson_completed')
 
 // Get a user's full achievement status (locked + unlocked).
 const achievements = await promocean.getAchievements()
+
+// Get a user's points wallet: running balance + a short recent ledger.
+const { balance, recent } = await promocean.getWallet()
+
+// Get a user's current/longest daily activity streak.
+const { current, longest, lastActiveDay } = await promocean.getStreak()
+
+// Get the top users in the project by points (optionally windowed/limited).
+const { entries } = await promocean.getLeaderboard({ window: '7d', limit: 10 })
 
 // Get the active offer for a placement slug (or null if none).
 const offer = await promocean.getPlacementOffer('homepage-banner')
@@ -67,6 +77,36 @@ const liveEvents = await promocean.getLiveEvents()
 `identify(userId)` sets the current user. `track()` and `getAchievements()`
 throw if called before a user is identified. `getPlacementOffer()` and
 `getLiveEvents()` work anonymously (no `userId` required).
+
+### Points, streaks, leaderboards
+
+```ts
+promocean.getWallet(): Promise<WalletResponse>       // { balance, recent: [{ delta, source, sourceRef, at }] }
+promocean.getStreak(): Promise<StreakResponse>       // { current, longest, lastActiveDay }
+promocean.getLeaderboard(opts?): Promise<LeaderboardResponse> // { window, entries: [{ rank, userId, points }] }
+```
+
+`getWallet()` and `getStreak()` read the identified user (`identify()`
+first, same as `getAchievements()`). `getLeaderboard({ window?, limit? })`
+is anonymous — `window` is `'all' | '7d' | '30d'` (default `'all'` on the
+server), `limit` defaults to `10` (max `100`).
+
+`track()` sets `tzOffsetMinutes` automatically on every call (minutes east
+of UTC, from `-new Date().getTimezoneOffset()`), which is what the server
+uses to resolve the event's client-local calendar day for streak
+advancement. If you construct the request yourself instead of going through
+this SDK and omit it (or send a non-numeric/invalid value), the server falls
+back to treating the event as UTC for that one event — streak computation
+never fails, it just uses the UTC day boundary instead of the caller's local
+one.
+
+**Leaderboard privacy note:** `getLeaderboard()` is callable with a
+publishable key and returns every ranked user's external `userId` alongside
+their points — anyone holding your `pk_...` key can see it. If your
+`userId`s are anything identifying (emails, real names, etc.), pass an
+opaque/pseudonymous id to `identify()`/`track()` instead and map it to a
+display name in your own app before showing a leaderboard; Promocean has no
+notion of identity beyond the id you give it.
 
 ### Server-side stats (`secretKey`)
 
@@ -148,6 +188,7 @@ misconfigured or compromised CMS content.
 ## Types
 
 Request/response shapes (`TrackEventResponse`, `AchievementStatus`,
-`OfferCreative`, `UnlockPayload`, `LiveTimedEvent`, etc.) are re-exported
+`OfferCreative`, `UnlockPayload`, `LiveTimedEvent`, `WalletResponse`,
+`StreakResponse`, `LeaderboardResponse`, etc.) are re-exported
 from `@promocean/contracts` and validated at runtime with zod — a malformed
 API response throws rather than silently returning bad data.
