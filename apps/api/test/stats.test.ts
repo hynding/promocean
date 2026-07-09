@@ -8,7 +8,7 @@ const timedEvents = [
   {
     id: 'te1', name: 'Summer Sprint', description: null,
     startsAt: new Date('2026-01-01T00:00:00.000Z'), endsAt: new Date('2026-01-08T00:00:00.000Z'),
-    endingSoonMinutes: 60, multiplier: 2, enabled: true,
+    endingSoonMinutes: 60, multiplier: 2, enabled: true, recurrence: 'none' as const, recurrenceEndsAt: null,
   },
 ]
 const headers = { authorization: 'Bearer pk_test_valid_key_1', 'content-type': 'application/json' }
@@ -77,6 +77,24 @@ describe('GET /v1/stats', () => {
     expect(fakes.statsCalls[0]!.scope).toEqual({ projectId: 'p1', environment: 'test' })
     expect(fakes.statsCalls[0]!.range).toEqual({ from: new Date('2026-01-01T00:00:00.000Z'), to: new Date('2026-01-31T00:00:00.000Z') })
     expect(fakes.statsCalls[0]!.timedEventWindows).toEqual([{ eventId: 'te1', startsAt: timedEvents[0]!.startsAt, endsAt: timedEvents[0]!.endsAt }])
+  })
+
+  it('recurring event yields one occurrence window per occurrence intersecting the range', async () => {
+    const daily = [{
+      id: 'te1', name: 'Daily', description: null,
+      startsAt: new Date('2026-01-01T00:00:00.000Z'), endsAt: new Date('2026-01-01T01:00:00.000Z'),
+      endingSoonMinutes: 60, multiplier: 2, enabled: true, recurrence: 'daily' as const, recurrenceEndsAt: null,
+    }]
+    const fakes = makeFakes([], skAuth(), [], daily)
+    const app = createApp(fakes, { rateLimitPerMinute: 0 })
+    // range spans occ0 (Jan 1) and occ1 (Jan 2 00:00 < 00:30), stopping before occ2.
+    const res = await app.request('/v1/stats?from=2026-01-01T00:00:00.000Z&to=2026-01-02T00:30:00.000Z', { headers })
+    expect(res.status).toBe(200)
+    expect(fakes.statsCalls).toHaveLength(1)
+    expect(fakes.statsCalls[0]!.timedEventWindows).toEqual([
+      { eventId: 'te1', startsAt: new Date('2026-01-01T00:00:00.000Z'), endsAt: new Date('2026-01-01T01:00:00.000Z') },
+      { eventId: 'te1', startsAt: new Date('2026-01-02T00:00:00.000Z'), endsAt: new Date('2026-01-02T01:00:00.000Z') },
+    ])
   })
 
   it('config-store failure -> 200 with empty timedEvents (stats still serve)', async () => {

@@ -175,6 +175,7 @@ export function buildOpenApiDocument(version: string) {
     '/v1/stats': {
       get: {
         summary: 'Aggregate project stats: totals, achievements, offers (with CTR), and timed events. Requires a secret key.',
+        description: 'For recurring timed events, participation is aggregated across every occurrence window intersecting the requested range, clamped to the most recent 400 occurrences per event.',
         parameters: [
           { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
           { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
