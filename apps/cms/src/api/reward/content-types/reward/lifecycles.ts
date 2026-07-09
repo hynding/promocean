@@ -12,7 +12,7 @@ function fail(message: string): never {
 async function loadCurrent(event: any): Promise<Record<string, any>> {
   const where = event.params.where
   if (!where) return {}
-  const existing = await strapi.db.query('api::reward.reward').findOne({ where })
+  const existing = await strapi.db.query('api::reward.reward').findOne({ where, populate: ['project'] })
   return existing ?? {}
 }
 
