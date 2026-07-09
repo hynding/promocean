@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { evaluateEvent, type AchievementDefinition } from '../src/index.js'
 
 const defs: AchievementDefinition[] = [
-  { id: 'a1', name: 'First Lesson', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 1 },
-  { id: 'a2', name: 'Getting Started', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 10 },
-  { id: 'a3', name: 'Profiled', description: null, artworkUrl: null, eventType: 'profile_completed', targetCount: 1 },
+  { id: 'a1', name: 'First Lesson', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 1, pointsValue: 0 },
+  { id: 'a2', name: 'Getting Started', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 10, pointsValue: 0 },
+  { id: 'a3', name: 'Profiled', description: null, artworkUrl: null, eventType: 'profile_completed', targetCount: 1, pointsValue: 0 },
 ]
 const event = { userId: 'u1', type: 'lesson_completed', occurredAt: new Date('2026-07-06T00:00:00Z') }
 

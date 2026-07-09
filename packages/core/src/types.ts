@@ -12,6 +12,7 @@ export interface AchievementDefinition {
   artworkUrl: string | null
   eventType: string
   targetCount: number
+  pointsValue: number
 }
 
 export interface TrackedEvent {
@@ -68,3 +69,5 @@ export interface WebhookEndpointDefinition {
   secret: string
   enabled: boolean
 }
+
+export type PointRules = Record<string, number> // eventType -> points
