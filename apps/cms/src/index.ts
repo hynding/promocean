@@ -100,6 +100,41 @@ export default {
         project: project.documentId,
       },
     })
+    const rewards = [
+      {
+        slug: 'welcome_coupon',
+        name: 'Welcome Coupon',
+        description: 'A one-time welcome discount, free of charge.',
+        codeType: 'static' as const,
+        staticCode: 'WELCOME10',
+        codePrefix: null,
+        pointsPrice: 0,
+        startsAt: null,
+        endsAt: null,
+        perUserLimit: 1,
+        inventory: null,
+        enabled: true,
+      },
+      {
+        slug: 'demo_discount',
+        name: 'Demo Discount',
+        description: 'A generated-code discount reward for the demo project.',
+        codeType: 'generated' as const,
+        staticCode: null,
+        codePrefix: 'DEMO-',
+        pointsPrice: 100,
+        startsAt: null,
+        endsAt: null,
+        perUserLimit: 5,
+        inventory: 50,
+        enabled: true,
+      },
+    ]
+    for (const r of rewards) {
+      await strapi.documents('api::reward.reward').create({
+        data: { ...r, project: project.documentId },
+      })
+    }
     if (process.env.LOG_PLAINTEXT_KEYS === 'true') {
       strapi.log.info(`[promocean] Seeded demo project ${project.documentId} with keys pk=${rawKey} sk=${rawSecretKey}`)
     } else {
