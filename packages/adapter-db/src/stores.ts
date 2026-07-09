@@ -521,7 +521,14 @@ export class PgRewardStore implements RewardStore {
       let claimedAt: Date
 
       if (reward.codeType === 'static') {
-        code = reward.staticCode!
+        // Should be unreachable in practice — the cms lifecycle requires a non-empty staticCode
+        // for every codeType: 'static' reward — but guard explicitly so a misconfigured reward
+        // fails with a clear message instead of an opaque NOT NULL constraint violation on the
+        // insert below.
+        if (!reward.staticCode) {
+          throw new Error(`static reward ${reward.id} has no staticCode configured`)
+        }
+        code = reward.staticCode
         const [row] = await tx.insert(coupons)
           .values({ ...scope, rewardId: reward.id, userId, code, codeShared: true })
           .returning({ id: coupons.id, claimedAt: coupons.claimedAt })

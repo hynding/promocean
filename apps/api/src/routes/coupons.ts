@@ -85,9 +85,16 @@ export function couponsRoute(deps: AppDeps) {
       // Lost a race with erasure between validateCoupon and redeemCoupon.
       return c.json({ error: { code: 'not_found', message: 'Unknown coupon code.' } }, 404)
     }
+    // With shared code text possible across rewards (see the per-project staticCode-uniqueness
+    // lifecycle guard), the claim consumed by redeemCoupon can belong to a DIFFERENT reward than
+    // the one validateCoupon above happened to resolve for the same code text — so the response's
+    // rewardSlug must come from the consumed claim's rewardId, not the pre-resolved `reward`.
+    // Fall back to the pre-resolved slug if that id isn't in config (keeps the response schema
+    // satisfied; should only happen in the same benign race the 404 branch above already covers).
+    const redeemedReward = await resolveReward(deps, scope.projectId, result.rewardId)
     return c.json({
       redeemed: true,
-      rewardSlug: reward.slug,
+      rewardSlug: redeemedReward?.slug ?? reward.slug,
       redeemedAt: result.redeemedAt.toISOString(),
     } satisfies RedeemCouponResponse)
   })

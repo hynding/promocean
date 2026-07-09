@@ -127,6 +127,16 @@ describe('PgRewardStore.claimCoupon — free static', () => {
   })
 })
 
+describe('PgRewardStore.claimCoupon — misconfigured static reward', () => {
+  it('rejects with a descriptive error and writes no coupon row when staticCode is null', async () => {
+    const store = new PgRewardStore(db)
+    const rw = reward({ codeType: 'static', staticCode: null, codePrefix: null, pointsPrice: 0 })
+    await expect(store.claimCoupon(scope, 'misconfig-u1', rw, new Date()))
+      .rejects.toThrow(`static reward ${rw.id} has no staticCode configured`)
+    expect(await couponRows(scope, rw.id)).toHaveLength(0)
+  })
+})
+
 // ---- claim: priced generated ----
 
 describe('PgRewardStore.claimCoupon — priced generated', () => {

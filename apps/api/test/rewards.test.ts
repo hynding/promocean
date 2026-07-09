@@ -278,6 +278,33 @@ describe('POST /v1/coupons/redeem', () => {
     expect(await res.json()).toEqual({ redeemed: true, rewardSlug: 'sticker-pack', redeemedAt: redeemedAt.toISOString() })
   })
 
+  it('consumed claim belongs to a different reward than validate resolved (shared code text) -> rewardSlug from the consumed claim', async () => {
+    const validateResolved = reward({ id: 'r1', slug: 'sticker-pack' })
+    const actuallyRedeemed = reward({ id: 'r2', slug: 'other-reward' })
+    const { app, fakes } = setup(skAuth(), [validateResolved, actuallyRedeemed])
+    fakes.setValidateResult({ found: true, rewardId: 'r1', status: 'claimed' })
+    const redeemedAt = new Date('2026-01-01T00:00:00.000Z')
+    fakes.setRedeemResult({ ok: true, rewardId: 'r2', redeemedAt })
+    const res = await app.request('/v1/coupons/redeem', {
+      method: 'POST', headers, body: JSON.stringify({ code: 'ABC123XYZ0' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ redeemed: true, rewardSlug: 'other-reward', redeemedAt: redeemedAt.toISOString() })
+  })
+
+  it('consumed claim rewardId missing from config -> falls back to the pre-resolved slug', async () => {
+    const validateResolved = reward({ id: 'r1', slug: 'sticker-pack' })
+    const { app, fakes } = setup(skAuth(), [validateResolved])
+    fakes.setValidateResult({ found: true, rewardId: 'r1', status: 'claimed' })
+    const redeemedAt = new Date('2026-01-01T00:00:00.000Z')
+    fakes.setRedeemResult({ ok: true, rewardId: 'ghost-reward-id', redeemedAt })
+    const res = await app.request('/v1/coupons/redeem', {
+      method: 'POST', headers, body: JSON.stringify({ code: 'ABC123XYZ0' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ redeemed: true, rewardSlug: 'sticker-pack', redeemedAt: redeemedAt.toISOString() })
+  })
+
   it('store reports already_redeemed -> 409 already_redeemed', async () => {
     const r = reward({ id: 'r1', slug: 'sticker-pack' })
     const { app, fakes } = setup(skAuth(), [r])

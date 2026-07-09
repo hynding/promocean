@@ -234,16 +234,32 @@ pair (deadlock-free, fixed order) so two concurrent claims can never
 overspend a shared inventory cap or a user's points balance: unavailable
 rewards (disabled, out of window, sold out) and limit/balance violations
 both come back as `409` (`reward_unavailable`, `claim_limit_reached`,
-`insufficient_points`); an unknown reward slug is `404 not_found`.
+`insufficient_points`); an unknown reward slug is `404 not_found`. Setting a
+reward's `enabled` to `false` only blocks **new claims** — coupons already
+claimed remain fully redeemable, since expiry is evaluated separately (see
+below); to also stop redemption of outstanding codes, set `endsAt` in the
+past instead of (or in addition to) disabling the reward.
 
 Once claimed, a code is checked and consumed with the **secret-key-only**
-`POST /v1/coupons/validate` (read-only — reports whether a code is
-`claimed` or already `redeemed`, or `reason: 'not_found' | 'expired'` when
-invalid) and `POST /v1/coupons/redeem` (one-time; a second redeem attempt
-on the same code is rejected with `409 already_redeemed`). Both endpoints
-require a secret key precisely because they let the caller enumerate
-whether/how an arbitrary code resolves — a browser-exposed publishable key
-must never be able to do that.
+`POST /v1/coupons/validate` (read-only — reports `valid: true` with `status:
+'claimed'`, or `valid: false` with `reason: 'not_found' | 'already_redeemed'
+| 'expired'`) and `POST /v1/coupons/redeem` (one-time; a second redeem
+attempt on the same code is rejected with `409 already_redeemed`). Both
+endpoints require a secret key precisely because they let the caller
+enumerate whether/how an arbitrary code resolves — a browser-exposed
+publishable key must never be able to do that.
+
+**Claim privacy/abuse note:** `POST /v1/rewards/:slug/claim` is pk-accessible
+by design (like `track()`/`identify()`) and claims on behalf of whatever
+`userId` the caller passes — anyone holding a publishable key can claim a
+reward as any `userId`, including debiting that user's points balance for a
+priced reward. This is the same trust model as event tracking: a
+publishable key is meant to be embedded in a browser/client, so it can't be
+kept secret from the end user, and Promocean doesn't independently verify
+that the caller *is* the `userId` it claims to act as — that verification is
+the host app's responsibility (e.g. only calling claim from your own
+authenticated backend, or otherwise binding `userId` to a verified session)
+if claim-spoofing across users is a concern for your use case.
 
 **Static-code oldest-first semantics:** every claim of a static reward
 inserts its own coupon row sharing the same code string, so many users can

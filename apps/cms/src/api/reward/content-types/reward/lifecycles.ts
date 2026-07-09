@@ -2,6 +2,12 @@ import { errors } from '@strapi/utils'
 
 const SLUG_PATTERN = /^[a-z][a-z0-9_-]*$/
 const MAX_CODE_LENGTH = 64
+// A generated code is `codePrefix + 10 generated chars` (see couponCodeFromBytes in
+// @promocean/core), and the sk validate/redeem input bound (couponCodeSchema, in
+// packages/contracts/src/rewards.ts) is z.string().max(64) — so a prefix over 54 chars would
+// mint coupons the endpoints reject forever. staticCode has no such suffix, so its own cap stays
+// at the full 64.
+const MAX_CODE_PREFIX_LENGTH = 54
 
 function fail(message: string): never {
   throw new errors.ValidationError(message)
@@ -41,8 +47,8 @@ function validate(merged: Record<string, any>) {
     fail(`staticCode must be at most ${MAX_CODE_LENGTH} characters`)
   }
   const codePrefix = merged.codePrefix
-  if (typeof codePrefix === 'string' && codePrefix.length > MAX_CODE_LENGTH) {
-    fail(`codePrefix must be at most ${MAX_CODE_LENGTH} characters`)
+  if (typeof codePrefix === 'string' && codePrefix.length > MAX_CODE_PREFIX_LENGTH) {
+    fail(`codePrefix must be at most ${MAX_CODE_PREFIX_LENGTH} characters`)
   }
 
   const startsAt = merged.startsAt
@@ -95,16 +101,40 @@ async function checkSlugUnique(event: any, merged: Record<string, any>) {
   }
 }
 
+// Duplicate code text across rewards in the same project would make validate/redeem resolve
+// to the wrong reward (validateCoupon/redeemCoupon look up coupons by code text alone, scoped
+// only to project+environment — see PgRewardStore in packages/adapter-db/src/stores.ts). Only
+// static rewards are checked here: generated codes are minted per-claim from random entropy and
+// are already enforced unique at the DB layer (coupons_code_uq).
+async function checkStaticCodeUnique(event: any, merged: Record<string, any>) {
+  const codeType = merged.codeType ?? 'generated'
+  if (codeType !== 'static') return
+  const staticCode = merged.staticCode
+  const projectId = await resolveProjectId(merged.project)
+  if (!staticCode || projectId == null) return // no project set yet — nothing to scope uniqueness by
+  const where: Record<string, any> = { staticCode, project: projectId }
+  const existingId = event.params.where?.id
+  if (existingId != null) {
+    where.id = { $ne: existingId }
+  }
+  const count = await strapi.db.query('api::reward.reward').count({ where })
+  if (count > 0) {
+    fail(`staticCode "${staticCode}" is already in use for this project`)
+  }
+}
+
 export default {
   async beforeCreate(event: any) {
     const merged = { ...event.params.data }
     validate(merged)
     await checkSlugUnique(event, merged)
+    await checkStaticCodeUnique(event, merged)
   },
   async beforeUpdate(event: any) {
     const current = await loadCurrent(event)
     const merged = { ...current, ...event.params.data }
     validate(merged)
     await checkSlugUnique(event, merged)
+    await checkStaticCodeUnique(event, merged)
   },
 }
