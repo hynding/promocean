@@ -66,7 +66,7 @@ export default {
     const achievements = [
       { name: 'First Lesson', description: 'Complete your first lesson.', eventType: 'lesson_completed', targetCount: 1, pointsValue: 50 },
       { name: 'Getting Started', description: 'Complete ten lessons.', eventType: 'lesson_completed', targetCount: 10, pointsValue: 100 },
-      { name: 'Profiled', description: 'Complete your profile.', eventType: 'profile_completed', targetCount: 1 },
+      { name: 'Profiled', description: 'Complete your profile.', eventType: 'profile_completed', targetCount: 1, pointsValue: 75 },
     ]
     for (const a of achievements) {
       await strapi.documents('api::achievement.achievement').create({
