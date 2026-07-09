@@ -10,11 +10,11 @@ describe('GET /v1/openapi.json', () => {
     expect(res.status).toBe(200)
   })
 
-  it('describes all fifteen documented endpoints', async () => {
+  it('describes all sixteen documented endpoints', async () => {
     const res = await app().request('/v1/openapi.json')
     const doc = await res.json()
     expect(doc.openapi).toBe('3.0.3')
-    expect(Object.keys(doc.paths)).toHaveLength(15)
+    expect(Object.keys(doc.paths)).toHaveLength(16)
     expect(Object.keys(doc.paths)).toEqual(
       expect.arrayContaining([
         '/v1/events',
@@ -32,8 +32,17 @@ describe('GET /v1/openapi.json', () => {
         '/v1/rewards/{slug}/claim',
         '/v1/coupons/validate',
         '/v1/coupons/redeem',
+        '/v1/achievements/{id}/backfill',
       ]),
     )
+  })
+
+  it('documents 403 and 404 responses for the backfill endpoint', async () => {
+    const res = await app().request('/v1/openapi.json')
+    const doc = await res.json()
+    const responses = doc.paths['/v1/achievements/{id}/backfill'].post.responses
+    expect(responses['403']).toBeDefined()
+    expect(responses['404']).toBeDefined()
   })
 
   it('includes the error envelope schema', async () => {
