@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { date, index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { boolean, date, index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 export const runtime = pgSchema('runtime')
 
@@ -98,6 +98,26 @@ export const pointsLedger = runtime.table('points_ledger', {
 }, (t) => [
   index('points_ledger_user_ix').on(t.projectId, t.environment, t.userId),
   index('points_ledger_window_ix').on(t.projectId, t.environment, t.createdAt),
+])
+
+export const coupons = runtime.table('coupons', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: text('project_id').notNull(),
+  environment: text('environment').notNull(),
+  rewardId: text('reward_id').notNull(),
+  userId: text('user_id').notNull(),
+  code: text('code').notNull(),
+  codeShared: boolean('code_shared').notNull().default(false),
+  status: text('status').notNull().default('claimed'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }).defaultNow().notNull(),
+  redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('coupons_code_uq')
+    .on(t.projectId, t.environment, t.code)
+    .where(sql`${t.codeShared} = false`),
+  index('coupons_code_ix').on(t.projectId, t.environment, t.code),
+  index('coupons_reward_ix').on(t.projectId, t.environment, t.rewardId),
+  index('coupons_user_ix').on(t.projectId, t.environment, t.rewardId, t.userId),
 ])
 
 export const userStreaks = runtime.table('user_streaks', {
