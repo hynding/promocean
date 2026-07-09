@@ -1,8 +1,9 @@
 import {
   trackEventResponseSchema, userAchievementsResponseSchema, placementOfferResponseSchema,
-  liveEventsResponseSchema, statsResponseSchema,
+  liveEventsResponseSchema, statsResponseSchema, walletResponseSchema, streakResponseSchema,
+  leaderboardResponseSchema,
   type AchievementStatus, type TrackEventResponse, type UnlockPayload, type OfferCreative, type LiveTimedEvent,
-  type StatsResponse,
+  type StatsResponse, type WalletResponse, type StreakResponse, type LeaderboardResponse,
 } from '@promocean/contracts'
 
 export interface PromoceanOptions {
@@ -42,6 +43,8 @@ export class Promocean {
 
   identify(userId: string): void { this.userId = userId }
 
+  get currentUserId(): string | undefined { return this.userId }
+
   onUnlock(cb: (u: UnlockPayload) => void): () => void {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
@@ -77,9 +80,10 @@ export class Promocean {
     const run = async (): Promise<TrackEventResponse> => {
       if (!this.userId) throw new Error('No user identified — call identify(userId) first.')
       const idempotencyKey = crypto.randomUUID()
+      const tzOffsetMinutes = -new Date().getTimezoneOffset()
       const res = await this.request('/v1/events', {
         method: 'POST',
-        body: JSON.stringify({ userId: this.userId, type, idempotencyKey, ...(meta ? { meta } : {}) }),
+        body: JSON.stringify({ userId: this.userId, type, idempotencyKey, tzOffsetMinutes, ...(meta ? { meta } : {}) }),
       })
       const parsed = trackEventResponseSchema.parse(await res.json())
       for (const unlock of parsed.unlocks) for (const cb of this.listeners) cb(unlock)
@@ -94,6 +98,27 @@ export class Promocean {
     if (!this.userId) throw new Error('No user identified — call identify(userId) first.')
     const res = await this.request(`/v1/users/${encodeURIComponent(this.userId)}/achievements`)
     return userAchievementsResponseSchema.parse(await res.json()).achievements
+  }
+
+  async getWallet(): Promise<WalletResponse> {
+    if (!this.userId) throw new Error('No user identified — call identify(userId) first.')
+    const res = await this.request(`/v1/users/${encodeURIComponent(this.userId)}/wallet`)
+    return walletResponseSchema.parse(await res.json())
+  }
+
+  async getStreak(): Promise<StreakResponse> {
+    if (!this.userId) throw new Error('No user identified — call identify(userId) first.')
+    const res = await this.request(`/v1/users/${encodeURIComponent(this.userId)}/streak`)
+    return streakResponseSchema.parse(await res.json())
+  }
+
+  async getLeaderboard(opts?: { window?: 'all' | '7d' | '30d'; limit?: number }): Promise<LeaderboardResponse> {
+    const params = new URLSearchParams()
+    if (opts?.window) params.set('window', opts.window)
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
+    const qs = params.size > 0 ? `?${params.toString()}` : ''
+    const res = await this.request(`/v1/leaderboard${qs}`)
+    return leaderboardResponseSchema.parse(await res.json())
   }
 
   async getPlacementOffer(slug: string): Promise<OfferCreative | null> {

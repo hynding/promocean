@@ -161,6 +161,92 @@ describe('getStats', () => {
   })
 })
 
+describe('track tzOffsetMinutes', () => {
+  it('sends the sign-corrected timezone offset (east-positive)', async () => {
+    const spy = vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(-120)
+    try {
+      const fetchImpl = vi.fn().mockImplementation(() => ok(trackOk))
+      await client(fetchImpl).track('lesson_completed')
+      const body = JSON.parse(fetchImpl.mock.calls[0][1].body)
+      expect(body.tzOffsetMinutes).toBe(120)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+describe('getWallet', () => {
+  it('fetches and parses the wallet', async () => {
+    const body = { balance: 42, recent: [{ delta: 10, source: 'event', sourceRef: 'e1', at: '2026-07-06T00:00:00.000Z' }] }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(body))
+    const c = client(fetchImpl)
+    expect(await c.getWallet()).toEqual(body)
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/users/u1/wallet')
+  })
+  it('throws if no user identified', async () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    await expect(c.getWallet()).rejects.toThrow('No user identified — call identify(userId) first.')
+  })
+})
+
+describe('getStreak', () => {
+  it('fetches and parses the streak', async () => {
+    const body = { current: 3, longest: 7, lastActiveDay: '2026-07-06' }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(body))
+    const c = client(fetchImpl)
+    expect(await c.getStreak()).toEqual(body)
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/users/u1/streak')
+  })
+  it('throws if no user identified', async () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    await expect(c.getStreak()).rejects.toThrow('No user identified — call identify(userId) first.')
+  })
+})
+
+describe('getLeaderboard', () => {
+  const leaderboardBody = { window: 'all', entries: [{ rank: 1, userId: 'u1', points: 100 }] }
+  it('sends no querystring when no opts are provided', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(leaderboardBody))
+    const c = client(fetchImpl)
+    expect(await c.getLeaderboard()).toEqual(leaderboardBody)
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/leaderboard')
+  })
+  it('encodes only the provided opts', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(leaderboardBody))
+    const c = client(fetchImpl)
+    await c.getLeaderboard({ window: '7d' })
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/leaderboard?window=7d')
+  })
+  it('encodes both opts when provided', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(leaderboardBody))
+    const c = client(fetchImpl)
+    await c.getLeaderboard({ window: '30d', limit: 5 })
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/leaderboard?window=30d&limit=5')
+  })
+  it('encodes only limit when only limit is provided', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok(leaderboardBody))
+    const c = client(fetchImpl)
+    await c.getLeaderboard({ limit: 20 })
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://api.test/v1/leaderboard?limit=20')
+  })
+})
+
+describe('currentUserId', () => {
+  it('reflects the constructor userId', () => {
+    const c = client(vi.fn())
+    expect(c.currentUserId).toBe('u1')
+  })
+  it('is undefined when no user is identified', () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    expect(c.currentUserId).toBeUndefined()
+  })
+  it('reflects identify() calls', () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    c.identify('u2')
+    expect(c.currentUserId).toBe('u2')
+  })
+})
+
 describe('getLiveEvents', () => {
   it('fetches and returns the live events array', async () => {
     const liveEventBody = {
