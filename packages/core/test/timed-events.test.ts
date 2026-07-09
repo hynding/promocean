@@ -4,7 +4,8 @@ import { activeEventIds, activeMultiplier, timedEventState, type TimedEventDefin
 const mk = (over: Partial<TimedEventDefinition>): TimedEventDefinition => ({
   id: 'e1', name: 'E', description: null,
   startsAt: new Date('2026-07-10T00:00:00Z'), endsAt: new Date('2026-07-17T00:00:00Z'),
-  endingSoonMinutes: 1440, multiplier: 2, enabled: true, ...over,
+  endingSoonMinutes: 1440, multiplier: 2, enabled: true,
+  recurrence: 'none', recurrenceEndsAt: null, ...over,
 })
 
 describe('timedEventState', () => {

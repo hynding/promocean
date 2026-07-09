@@ -52,6 +52,8 @@ export interface OfferDefinition {
 export type TimedEventState = 'draft' | 'scheduled' | 'live' | 'ending_soon' | 'ended'
 export type TimedEventTransition = 'live' | 'ending_soon' | 'ended'
 
+export type Recurrence = 'none' | 'daily' | 'weekly' | 'monthly'
+
 export interface TimedEventDefinition {
   id: string
   name: string
@@ -61,6 +63,10 @@ export interface TimedEventDefinition {
   endingSoonMinutes: number
   multiplier: number
   enabled: boolean
+  recurrence: Recurrence
+  /** Occurrences stop once an occurrence's startsAt would no longer be strictly before this
+   * instant; null means the recurrence never ends. Ignored when recurrence === 'none'. */
+  recurrenceEndsAt: Date | null
 }
 
 export interface WebhookEndpointDefinition {
