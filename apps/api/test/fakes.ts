@@ -1,6 +1,7 @@
 import type {
   AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, EngagementStore, EngagementWrite, ErasureStore,
-  IngestionStore, OfferDefinition, OfferMetricsStore, PointRules, ProgressStore, Scope, StatsStore, TimedEventDefinition,
+  IngestionStore, OfferDefinition, OfferMetricsStore, PointRules, ProgressStore, RewardDefinition, RewardStore,
+  Scope, StatsStore, TimedEventDefinition,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
@@ -12,6 +13,7 @@ export function makeFakes(
   timedEvents: TimedEventDefinition[] = [],
   registeredEventTypes: string[] = [],
   pointRules: PointRules = {},
+  rewards: RewardDefinition[] = [],
 ) {
   const seenIdem = new Set<string>()
   const progress = new Map<string, number>()
@@ -25,6 +27,7 @@ export function makeFakes(
     getWebhookEndpoints: async () => [],
     getRegisteredEventTypes: async () => registeredEventTypes,
     getPointRules: async () => pointRules,
+    getRewards: async () => rewards,
   }
   const apiKeyStore: ApiKeyStore = { verifyKey: async (raw) => (raw === 'pk_test_valid_key_1' ? auth : null) }
   const progressStore: ProgressStore = {
@@ -96,7 +99,7 @@ export function makeFakes(
     recordClick: async (_s, offerId, userId) => { metrics.clicks.push({ offerId, userId }) },
   }
   const erasedUsers: Array<{ scope: Scope; userId: string }> = []
-  const erasureCounts = { events: 1, progress: 2, unlocks: 3, offerEvents: 4, pointsLedger: 5, streaks: 6 }
+  const erasureCounts = { events: 1, progress: 2, unlocks: 3, offerEvents: 4, pointsLedger: 5, streaks: 6, coupons: 7 }
   const erasureStore: ErasureStore = {
     eraseUser: async (scope, userId) => {
       erasedUsers.push({ scope, userId })
@@ -142,9 +145,41 @@ export function makeFakes(
   const setStreakResult = (r: StreakResult) => { streakResult = r }
   const setLeaderboardResult = (r: LeaderboardResult) => { leaderboardResult = r }
 
+  type ClaimCouponResult = Awaited<ReturnType<RewardStore['claimCoupon']>>
+  type ValidateCouponResult = Awaited<ReturnType<RewardStore['validateCoupon']>>
+  type RedeemCouponResult = Awaited<ReturnType<RewardStore['redeemCoupon']>>
+  let claimCounts = new Map<string, number>()
+  let claimResult: ClaimCouponResult = { ok: false, reason: 'reward_unavailable' }
+  let validateResult: ValidateCouponResult = { found: false }
+  let redeemResult: RedeemCouponResult = { ok: false, reason: 'not_found' }
+  const claimCalls: Array<{ scope: Scope; userId: string; reward: RewardDefinition; now: Date }> = []
+  const validateCalls: Array<{ scope: Scope; code: string }> = []
+  const redeemCalls: Array<{ scope: Scope; code: string }> = []
+  const rewardStore: RewardStore = {
+    getClaimCounts: async (_scope, rewardIds) =>
+      new Map(rewardIds.flatMap((id) => (claimCounts.has(id) ? [[id, claimCounts.get(id)!] as const] : []))),
+    claimCoupon: async (scope, userId, reward, now) => {
+      claimCalls.push({ scope, userId, reward, now })
+      return claimResult
+    },
+    validateCoupon: async (scope, code) => {
+      validateCalls.push({ scope, code })
+      return validateResult
+    },
+    redeemCoupon: async (scope, code) => {
+      redeemCalls.push({ scope, code })
+      return redeemResult
+    },
+  }
+  const setClaimCounts = (m: Map<string, number>) => { claimCounts = m }
+  const setClaimResult = (r: ClaimCouponResult) => { claimResult = r }
+  const setValidateResult = (r: ValidateCouponResult) => { validateResult = r }
+  const setRedeemResult = (r: RedeemCouponResult) => { redeemResult = r }
+
   return {
     configStore, apiKeyStore, progressStore, ingestionStore, usage, offerMetricsStore, metrics, erasureStore,
     erasedUsers, erasureCounts, statsStore, statsCalls, setStatsResult, engagementCalls,
     engagementStore, setWalletResult, setStreakResult, setLeaderboardResult, leaderboardCalls,
+    rewardStore, claimCalls, validateCalls, redeemCalls, setClaimCounts, setClaimResult, setValidateResult, setRedeemResult,
   }
 }

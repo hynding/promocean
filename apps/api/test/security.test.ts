@@ -177,6 +177,7 @@ describe('DELETE /v1/users/:userId (erasure)', () => {
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json).toEqual({ erased: true, counts: fakes.erasureCounts })
+    expect(json.counts.coupons).toBe(fakes.erasureCounts.coupons)
     expect(fakes.erasedUsers).toEqual([{ scope: { projectId: 'p1', environment: 'test' }, userId: 'u1' }])
   })
 
