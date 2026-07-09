@@ -204,6 +204,18 @@ describe('PgEngagementStore', () => {
     expect(wallet.recent[19]?.sourceRef).toBe('r5')
   })
 
+  it('getWallet returns a stable order across repeated reads when two rows share the same created_at', async () => {
+    const store = new PgEngagementStore(db)
+    const userId = 'wallet-same-ts-user'
+    const at = new Date('2026-03-05T00:00:00.000Z')
+    await insertLedgerAt(scope, userId, 10, 'event', 'same-ts-a', at)
+    await insertLedgerAt(scope, userId, 5, 'unlock', 'same-ts-b', at)
+
+    const first = await store.getWallet(scope, userId)
+    const second = await store.getWallet(scope, userId)
+    expect(first.recent.map((r) => r.sourceRef)).toEqual(second.recent.map((r) => r.sourceRef))
+  })
+
   it('getWallet returns zero balance and empty recent for a user with no ledger rows', async () => {
     const store = new PgEngagementStore(db)
     const wallet = await store.getWallet(scope, 'no-such-user')

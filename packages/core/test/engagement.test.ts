@@ -130,4 +130,8 @@ describe('pointsForEvent', () => {
   it('floors a non-finite rule value (NaN) to 0', () => {
     expect(pointsForEvent(rules, 'weird')).toBe(0)
   })
+  it('floors a fractional positive rule value', () => {
+    const fractionalRules: PointRules = { partial: 1.5 }
+    expect(pointsForEvent(fractionalRules, 'partial')).toBe(1)
+  })
 })

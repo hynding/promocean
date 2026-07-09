@@ -185,7 +185,8 @@ current/longest consecutive-day streak, advanced once per distinct
 client-local calendar day (see the tz-offset fallback below) — multiple
 events on the same local day don't double-count. `GET /v1/leaderboard`
 ranks all users in a project by total points, optionally windowed and
-limited (see the table above).
+limited (see the table above). Timed-event multipliers apply to achievement
+progress only; point awards are never multiplied.
 
 **Leaderboard privacy note:** these three endpoints are pk-accessible by
 design, and the leaderboard response exposes every ranked user's external

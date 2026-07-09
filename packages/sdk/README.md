@@ -89,7 +89,8 @@ promocean.getLeaderboard(opts?): Promise<LeaderboardResponse> // { window, entri
 `getWallet()` and `getStreak()` read the identified user (`identify()`
 first, same as `getAchievements()`). `getLeaderboard({ window?, limit? })`
 is anonymous — `window` is `'all' | '7d' | '30d'` (default `'all'` on the
-server), `limit` defaults to `10` (max `100`).
+server), `limit` defaults to `10` (max `100`). Timed-event multipliers
+apply to achievement progress only; point awards are never multiplied.
 
 `track()` sets `tzOffsetMinutes` automatically on every call (minutes east
 of UTC, from `-new Date().getTimezoneOffset()`), which is what the server

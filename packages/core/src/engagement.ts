@@ -58,8 +58,13 @@ export function applyStreak(prev: StreakState, day: string): StreakState | null 
   return { current, longest, lastActiveDay: day }
 }
 
-/** Looks up the point award for an event type; unmatched, zero, negative, or non-finite rules all yield 0. */
+/**
+ * Looks up the point award for an event type; unmatched, zero, negative, or non-finite rules
+ * all yield 0. A finite positive rule is floored — the ledger's delta column is an integer, and
+ * flooring here (rather than letting a fractional value reach the DB) keeps ingestion from
+ * aborting if an alternate ConfigStore ever returns an unfiltered fractional rule.
+ */
 export function pointsForEvent(rules: PointRules, eventType: string): number {
   const raw = rules[eventType] ?? 0
-  return Number.isFinite(raw) && raw > 0 ? raw : 0
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
 }

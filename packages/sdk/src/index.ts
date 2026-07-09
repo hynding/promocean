@@ -116,8 +116,8 @@ export class Promocean {
     const params = new URLSearchParams()
     if (opts?.window) params.set('window', opts.window)
     if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
-    const qs = params.size > 0 ? `?${params.toString()}` : ''
-    const res = await this.request(`/v1/leaderboard${qs}`)
+    const qs = params.toString()
+    const res = await this.request(`/v1/leaderboard${qs ? `?${qs}` : ''}`)
     return leaderboardResponseSchema.parse(await res.json())
   }
 

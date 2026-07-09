@@ -217,7 +217,7 @@ export class PgEngagementStore implements EngagementStore {
     })
       .from(pointsLedger)
       .where(and(scoped(pointsLedger, scope), eq(pointsLedger.userId, userId)))
-      .orderBy(desc(pointsLedger.createdAt))
+      .orderBy(desc(pointsLedger.createdAt), desc(pointsLedger.id))
       .limit(20)
     return {
       balance: balanceRow?.balance ?? 0,
@@ -426,11 +426,19 @@ export class PgErasureStore implements ErasureStore {
       const deletedOfferEvents = await tx.delete(offerEvents)
         .where(and(scoped(offerEvents, scope), eq(offerEvents.userId, userId)))
         .returning({ id: offerEvents.id })
+      const deletedPointsLedger = await tx.delete(pointsLedger)
+        .where(and(scoped(pointsLedger, scope), eq(pointsLedger.userId, userId)))
+        .returning({ id: pointsLedger.id })
+      const deletedStreaks = await tx.delete(userStreaks)
+        .where(and(scoped(userStreaks, scope), eq(userStreaks.userId, userId)))
+        .returning({ userId: userStreaks.userId })
       return {
         events: deletedEvents.length,
         progress: deletedProgress.length,
         unlocks: deletedUnlocks.length,
         offerEvents: deletedOfferEvents.length,
+        pointsLedger: deletedPointsLedger.length,
+        streaks: deletedStreaks.length,
       }
     })
   }

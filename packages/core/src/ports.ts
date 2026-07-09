@@ -113,5 +113,5 @@ export interface WebhookDeliveryStore {
 }
 
 export interface ErasureStore {
-  eraseUser(scope: Scope, userId: string): Promise<{ events: number; progress: number; unlocks: number; offerEvents: number }>
+  eraseUser(scope: Scope, userId: string): Promise<{ events: number; progress: number; unlocks: number; offerEvents: number; pointsLedger: number; streaks: number }>
 }

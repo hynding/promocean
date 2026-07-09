@@ -65,6 +65,8 @@ describe('eraseUserResponseSchema', () => {
         progress: 10,
         unlocks: 5,
         offerEvents: 3,
+        pointsLedger: 7,
+        streaks: 1,
       },
     }
     expect(eraseUserResponseSchema.parse(payload)).toEqual(payload)
@@ -77,6 +79,8 @@ describe('eraseUserResponseSchema', () => {
         progress: 10,
         unlocks: 5,
         offerEvents: 3,
+        pointsLedger: 7,
+        streaks: 1,
       },
     })
     expect(result.success).toBe(false)
@@ -224,15 +228,27 @@ describe('trackEventRequestSchema with tzOffsetMinutes', () => {
     const result = trackEventRequestSchema.safeParse(payload)
     expect(result.success).toBe(true)
   })
-  it('rejects a track request with non-integer tzOffsetMinutes', () => {
+  it('parses successfully with tzOffsetMinutes stripped to undefined when it is a non-numeric string', () => {
     const payload = {
       userId: 'u1',
       type: 'lesson_completed',
       idempotencyKey: 'a'.repeat(12),
-      tzOffsetMinutes: -300.5,
+      tzOffsetMinutes: '60',
     }
     const result = trackEventRequestSchema.safeParse(payload)
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.tzOffsetMinutes).toBeUndefined()
+  })
+  it('parses successfully with tzOffsetMinutes stripped to undefined when it is a fractional number', () => {
+    const payload = {
+      userId: 'u1',
+      type: 'lesson_completed',
+      idempotencyKey: 'a'.repeat(12),
+      tzOffsetMinutes: 300.5,
+    }
+    const result = trackEventRequestSchema.safeParse(payload)
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.tzOffsetMinutes).toBeUndefined()
   })
 })
 

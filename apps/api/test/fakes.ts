@@ -96,7 +96,7 @@ export function makeFakes(
     recordClick: async (_s, offerId, userId) => { metrics.clicks.push({ offerId, userId }) },
   }
   const erasedUsers: Array<{ scope: Scope; userId: string }> = []
-  const erasureCounts = { events: 1, progress: 2, unlocks: 3, offerEvents: 4 }
+  const erasureCounts = { events: 1, progress: 2, unlocks: 3, offerEvents: 4, pointsLedger: 5, streaks: 6 }
   const erasureStore: ErasureStore = {
     eraseUser: async (scope, userId) => {
       erasedUsers.push({ scope, userId })
