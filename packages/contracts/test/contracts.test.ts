@@ -23,6 +23,9 @@ import {
   validateCouponResponseSchema,
   redeemCouponRequestSchema,
   redeemCouponResponseSchema,
+  recurrenceSchema,
+  liveTimedEventSchema,
+  backfillResponseSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -523,5 +526,74 @@ describe('redeemCouponResponseSchema', () => {
   })
   it('rejects redeemed: false', () => {
     expect(redeemCouponResponseSchema.safeParse({ redeemed: false, rewardSlug: 'x', redeemedAt: '2026-07-08T10:00:00.000Z' }).success).toBe(false)
+  })
+})
+
+describe('recurrenceSchema', () => {
+  it('accepts the four recurrence values', () => {
+    for (const value of ['none', 'daily', 'weekly', 'monthly']) {
+      expect(recurrenceSchema.safeParse(value).success).toBe(true)
+    }
+  })
+  it('rejects other values', () => {
+    for (const value of ['yearly', 'Daily', '', 'NONE']) {
+      expect(recurrenceSchema.safeParse(value).success).toBe(false)
+    }
+  })
+})
+
+describe('liveTimedEventSchema recurrence fields', () => {
+  const baseEvent = {
+    eventId: 'e1',
+    name: 'Double Points Weekend',
+    description: null,
+    state: 'live' as const,
+    startsAt: '2026-07-08T00:00:00.000Z',
+    endsAt: '2026-07-09T00:00:00.000Z',
+    multiplier: 2,
+    secondsUntilStart: null,
+    secondsUntilEnd: 3600,
+  }
+
+  it('parses an event WITHOUT the two new fields and applies back-compat defaults', () => {
+    const result = liveTimedEventSchema.safeParse(baseEvent)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.recurrence).toBe('none')
+      expect(result.data.nextOccurrenceStartsAt).toBeNull()
+    }
+  })
+
+  it('round-trips an event with recurrence and nextOccurrenceStartsAt set', () => {
+    const payload = {
+      ...baseEvent,
+      recurrence: 'weekly' as const,
+      nextOccurrenceStartsAt: '2026-07-15T00:00:00.000Z',
+    }
+    expect(liveTimedEventSchema.parse(payload)).toEqual(payload)
+  })
+})
+
+describe('backfillResponseSchema', () => {
+  it('round-trips a valid backfill response', () => {
+    const payload = {
+      usersEvaluated: 100,
+      progressRaised: 40,
+      unlocksGranted: 10,
+      pointsAwarded: 500,
+    }
+    expect(backfillResponseSchema.parse(payload)).toEqual(payload)
+  })
+  it('rejects negative counts', () => {
+    const valid = {
+      usersEvaluated: 100,
+      progressRaised: 40,
+      unlocksGranted: 10,
+      pointsAwarded: 500,
+    }
+    for (const key of Object.keys(valid)) {
+      const payload = { ...valid, [key]: -1 }
+      expect(backfillResponseSchema.safeParse(payload).success).toBe(false)
+    }
   })
 })

@@ -9,7 +9,9 @@ const event = {
 
 describe('timed event schemas', () => {
   it('round-trips a live events response', () => {
-    expect(liveEventsResponseSchema.parse({ events: [event] })).toEqual({ events: [event] })
+    expect(liveEventsResponseSchema.parse({ events: [event] })).toEqual({
+      events: [{ ...event, recurrence: 'none', nextOccurrenceStartsAt: null }],
+    })
   })
   it('rejects draft/ended states on the wire', () => {
     for (const state of ['draft', 'ended', 'nope'])
