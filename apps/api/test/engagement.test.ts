@@ -125,6 +125,13 @@ describe('GET /v1/users/:userId/streak', () => {
     expect(res.status).toBe(400)
     expect((await res.json()).error.code).toBe('invalid_payload')
   })
+
+  it('allows a userId of exactly 128 chars', async () => {
+    const fakes = makeFakes([], auth)
+    const okId = 'u'.repeat(128)
+    const res = await createApp(fakes).request(`/v1/users/${okId}/streak`, { headers })
+    expect(res.status).toBe(200)
+  })
 })
 
 describe('GET /v1/leaderboard', () => {
@@ -164,6 +171,27 @@ describe('GET /v1/leaderboard', () => {
     const res = await createApp(fakes).request('/v1/leaderboard?limit=0', { headers })
     expect(res.status).toBe(400)
     expect((await res.json()).error.code).toBe('invalid_payload')
+  })
+
+  it('rejects limit=101 with invalid_payload', async () => {
+    const fakes = makeFakes([], auth)
+    const res = await createApp(fakes).request('/v1/leaderboard?limit=101', { headers })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error.code).toBe('invalid_payload')
+  })
+
+  it('accepts limit=100', async () => {
+    const fakes = makeFakes([], auth)
+    const res = await createApp(fakes).request('/v1/leaderboard?limit=100', { headers })
+    expect(res.status).toBe(200)
+    expect(fakes.leaderboardCalls[0]).toMatchObject({ limit: 100 })
+  })
+
+  it('accepts limit=1', async () => {
+    const fakes = makeFakes([], auth)
+    const res = await createApp(fakes).request('/v1/leaderboard?limit=1', { headers })
+    expect(res.status).toBe(200)
+    expect(fakes.leaderboardCalls[0]).toMatchObject({ limit: 1 })
   })
 
   it('rejects a non-integer limit with invalid_payload', async () => {
