@@ -1,4 +1,5 @@
 import { Promocean } from '@promocean/sdk'
+import { BackfillForm } from './backfill-form'
 import { CouponCheckForm } from './coupon-check-form'
 
 // Server component only: reads process.env.PROMOCEAN_SECRET_KEY (never
@@ -92,6 +93,7 @@ export default async function StatsPage() {
       </section>
 
       <CouponCheckForm />
+      <BackfillForm />
     </main>
   )
 }

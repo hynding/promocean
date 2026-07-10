@@ -170,6 +170,8 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         endingSoonMinutes: e.endingSoonMinutes,
         multiplier: e.multiplier,
         enabled: e.enabled,
+        recurrence: e.recurrence,
+        recurrenceEndsAt: e.recurrenceEndsAt ? new Date(e.recurrenceEndsAt) : null,
       }))
       this.timedEventsCache.set(projectId, { value: events, expires: Date.now() + this.ttl })
       return events
@@ -203,6 +205,8 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         endingSoonMinutes: e.endingSoonMinutes,
         multiplier: e.multiplier,
         enabled: e.enabled,
+        recurrence: e.recurrence,
+        recurrenceEndsAt: e.recurrenceEndsAt ? new Date(e.recurrenceEndsAt) : null,
       }))
       this.allTimedEventsCache.set(key, { value: events, expires: Date.now() + this.ttl })
       return events

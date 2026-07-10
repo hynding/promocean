@@ -11,7 +11,8 @@
     "endingSoonMinutes": { "type": "integer", "required": true, "min": 1, "default": 1440 },
     "multiplier": { "type": "integer", "required": true, "min": 1, "default": 1 },
     "enabled": { "type": "boolean", "required": true, "default": true },
-    "recurrence": { "type": "json" },
+    "recurrence": { "type": "enumeration", "enum": ["none", "daily", "weekly", "monthly"], "default": "none", "required": true },
+    "recurrenceEndsAt": { "type": "datetime" },
     "project": { "type": "relation", "relation": "manyToOne", "target": "api::project.project" }
   }
 }

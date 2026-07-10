@@ -263,6 +263,7 @@ const timedEventsBody = {
     id: '1', name: 'Summer Sale', description: null,
     startsAt: '2026-07-01T00:00:00.000Z', endsAt: '2026-07-10T00:00:00.000Z',
     endingSoonMinutes: 60, multiplier: 2, enabled: true,
+    recurrence: 'weekly', recurrenceEndsAt: '2026-12-31T00:00:00.000Z',
   }],
 }
 
@@ -274,9 +275,11 @@ describe('StrapiConfigPlane.getTimedEvents', () => {
     expect(events[0]).toMatchObject({
       id: '1', name: 'Summer Sale', description: null,
       endingSoonMinutes: 60, multiplier: 2, enabled: true,
+      recurrence: 'weekly',
     })
     expect(events[0].startsAt).toEqual(new Date('2026-07-01T00:00:00.000Z'))
     expect(events[0].endsAt).toEqual(new Date('2026-07-10T00:00:00.000Z'))
+    expect(events[0].recurrenceEndsAt).toEqual(new Date('2026-12-31T00:00:00.000Z'))
   })
   it('serves stale cache when strapi errors after a successful fetch', async () => {
     const fetchImpl = vi.fn()
@@ -291,6 +294,33 @@ describe('StrapiConfigPlane.getTimedEvents', () => {
     const plane = makePlane(vi.fn().mockImplementation(() => ok({ events: [{ id: '1' }] })))
     await expect(plane.getTimedEvents('p1')).rejects.toThrow()
   })
+  it('defaults recurrence to none and recurrenceEndsAt to null when absent (old cms back-compat)', async () => {
+    const body = {
+      events: [{
+        id: '1', name: 'Summer Sale', description: null,
+        startsAt: '2026-07-01T00:00:00.000Z', endsAt: '2026-07-10T00:00:00.000Z',
+        endingSoonMinutes: 60, multiplier: 2, enabled: true,
+      }],
+    }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(body))
+    const events = await makePlane(fetchImpl).getTimedEvents('p1')
+    expect(events[0].recurrence).toBe('none')
+    expect(events[0].recurrenceEndsAt).toBeNull()
+  })
+  it('serves stale cache when a bad recurrence value fails validation after expiry', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(timedEventsBody))
+      .mockImplementation(() => ok({ events: [{ ...timedEventsBody.events[0], recurrence: 'yearly' }] }))
+    const plane = makePlane(fetchImpl, 0) // TTL 0: always expired
+    await plane.getTimedEvents('p1')
+    const events = await plane.getTimedEvents('p1')
+    expect(events[0].recurrence).toBe('weekly') // stale value, not the invalid one
+  })
+  it('throws on a bad recurrence value with no cache', async () => {
+    const body = { events: [{ ...timedEventsBody.events[0], recurrence: 'yearly' }] }
+    const plane = makePlane(vi.fn().mockImplementation(() => ok(body)))
+    await expect(plane.getTimedEvents('p1')).rejects.toThrow()
+  })
 })
 
 const allTimedEventsBody = {
@@ -298,6 +328,7 @@ const allTimedEventsBody = {
     id: '2', projectId: 'p1', name: 'Autumn Sale', description: 'desc',
     startsAt: '2026-09-01T00:00:00.000Z', endsAt: '2026-09-10T00:00:00.000Z',
     endingSoonMinutes: 1440, multiplier: 1, enabled: false,
+    recurrence: 'monthly', recurrenceEndsAt: null,
   }],
 }
 
@@ -306,10 +337,38 @@ describe('StrapiConfigPlane.getAllTimedEvents', () => {
     const fetchImpl = vi.fn().mockImplementation(() => ok(allTimedEventsBody))
     const events = await makePlane(fetchImpl).getAllTimedEvents()
     expect(String(fetchImpl.mock.calls[0][0])).toBe('http://cms.test/api/config-plane/timed-events/all')
-    expect(events[0]).toMatchObject({ id: '2', projectId: 'p1', name: 'Autumn Sale', enabled: false })
+    expect(events[0]).toMatchObject({ id: '2', projectId: 'p1', name: 'Autumn Sale', enabled: false, recurrence: 'monthly' })
+    expect(events[0].recurrenceEndsAt).toBeNull()
   })
   it('throws on a malformed body with no cache', async () => {
     const plane = makePlane(vi.fn().mockImplementation(() => ok({ events: [{ id: '2' }] })))
+    await expect(plane.getAllTimedEvents()).rejects.toThrow()
+  })
+  it('defaults recurrence to none and recurrenceEndsAt to null when absent (old cms back-compat)', async () => {
+    const body = {
+      events: [{
+        id: '2', projectId: 'p1', name: 'Autumn Sale', description: 'desc',
+        startsAt: '2026-09-01T00:00:00.000Z', endsAt: '2026-09-10T00:00:00.000Z',
+        endingSoonMinutes: 1440, multiplier: 1, enabled: false,
+      }],
+    }
+    const fetchImpl = vi.fn().mockImplementation(() => ok(body))
+    const events = await makePlane(fetchImpl).getAllTimedEvents()
+    expect(events[0].recurrence).toBe('none')
+    expect(events[0].recurrenceEndsAt).toBeNull()
+  })
+  it('serves stale cache when a bad recurrence value fails validation after expiry', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => ok(allTimedEventsBody))
+      .mockImplementation(() => ok({ events: [{ ...allTimedEventsBody.events[0], recurrence: 'yearly' }] }))
+    const plane = makePlane(fetchImpl, 0) // TTL 0: always expired
+    await plane.getAllTimedEvents()
+    const events = await plane.getAllTimedEvents()
+    expect(events[0].recurrence).toBe('monthly') // stale value, not the invalid one
+  })
+  it('throws on a bad recurrence value with no cache', async () => {
+    const body = { events: [{ ...allTimedEventsBody.events[0], recurrence: 'yearly' }] }
+    const plane = makePlane(vi.fn().mockImplementation(() => ok(body)))
     await expect(plane.getAllTimedEvents()).rejects.toThrow()
   })
   it('omits endedWithinMinutes when allTimedEventsEndedWithinMinutes is not configured', async () => {

@@ -13,6 +13,7 @@ export const errorCodeSchema = z.enum([
   'claim_limit_reached',
   'insufficient_points',
   'already_redeemed',
+  'backfill_in_progress',
 ])
 export type ErrorCode = z.infer<typeof errorCodeSchema>
 

@@ -2,10 +2,11 @@ import {
   trackEventResponseSchema, userAchievementsResponseSchema, placementOfferResponseSchema,
   liveEventsResponseSchema, statsResponseSchema, walletResponseSchema, streakResponseSchema,
   leaderboardResponseSchema, rewardsResponseSchema, claimRewardResponseSchema,
-  validateCouponResponseSchema, redeemCouponResponseSchema,
+  validateCouponResponseSchema, redeemCouponResponseSchema, backfillResponseSchema,
   type AchievementStatus, type TrackEventResponse, type UnlockPayload, type OfferCreative, type LiveTimedEvent,
   type StatsResponse, type WalletResponse, type StreakResponse, type LeaderboardResponse,
   type Reward, type ClaimRewardResponse, type ValidateCouponResponse, type RedeemCouponResponse,
+  type BackfillResponse,
 } from '@promocean/contracts'
 
 export interface PromoceanOptions {
@@ -198,6 +199,14 @@ export class Promocean {
       body: JSON.stringify({ code }),
     }, { useSecretKey: true })
     return redeemCouponResponseSchema.parse(await res.json())
+  }
+
+  async backfillAchievement(achievementId: string): Promise<BackfillResponse> {
+    if (!this.opts.secretKey) throw new Error('backfillAchievement requires the secretKey option (server-side only).')
+    const res = await this.request(`/v1/achievements/${encodeURIComponent(achievementId)}/backfill`, {
+      method: 'POST',
+    }, { useSecretKey: true })
+    return backfillResponseSchema.parse(await res.json())
   }
 
   private dismissalKey(offerId: string) { return `promocean:dismissed:${offerId}` }

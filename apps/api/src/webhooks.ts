@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto'
 import type { Logger } from 'pino'
 import { WEBHOOK_SIGNATURE_HEADER, type WebhookMessage } from '@promocean/contracts'
-import { timedEventState, type ConfigStore, type TimedEventDefinition, type TimedEventTransition, type WebhookDeliveryStore, type WebhookEndpointDefinition } from '@promocean/core'
+import { occurrenceFromKey, transitionOccurrence, type ConfigStore, type OccurrenceWindow, type TimedEventDefinition, type TimedEventTransition, type WebhookDeliveryStore, type WebhookEndpointDefinition } from '@promocean/core'
 import { logger as rootLogger } from './logger.js'
 
 const BASE_BACKOFF_MS = 250
@@ -55,11 +55,12 @@ export class WebhookDispatcher {
   async deliverTransition(
     projectId: string,
     eventId: string,
+    occurrenceKey: string,
     transition: TimedEventTransition,
     message: WebhookMessage,
   ): Promise<void> {
     await this.deliver(projectId, message)
-    await this.deliveryStore.markDelivered(projectId, eventId, transition)
+    await this.deliveryStore.markDelivered(projectId, eventId, occurrenceKey, transition)
   }
 
   private async deliverToEndpoint(projectId: string, endpoint: WebhookEndpointDefinition, rawBody: string): Promise<void> {
@@ -102,36 +103,44 @@ export class WebhookDispatcher {
   }
 }
 
-function reachedTransitions(state: ReturnType<typeof timedEventState>): TimedEventTransition[] {
-  switch (state) {
-    case 'live':
-      return ['live']
-    case 'ending_soon':
-      return ['live', 'ending_soon']
-    case 'ended':
-      return ['live', 'ending_soon', 'ended']
-    default:
-      return []
-  }
+/**
+ * Transitions reached for a specific occurrence window as of `now` — the scheduler's view.
+ * Mirrors the state cascade (ended implies ending_soon implies live) but is evaluated against
+ * the occurrence's own bounds rather than the definition's, so between occurrences the
+ * just-elapsed occurrence (from transitionOccurrence) can still fire its 'ended' transition.
+ */
+function reachedTransitionsFor(occ: OccurrenceWindow, now: Date, endingSoonMinutes: number): TimedEventTransition[] {
+  const nowMs = now.getTime()
+  if (nowMs >= occ.endsAt.getTime()) return ['live', 'ending_soon', 'ended']
+  if (occ.endsAt.getTime() - nowMs <= endingSoonMinutes * 60_000) return ['live', 'ending_soon']
+  if (nowMs >= occ.startsAt.getTime()) return ['live']
+  return []
 }
 
 /** Builds a fresh transition message. Called with a new messageId on every delivery attempt —
- * including redeliveries, which consumers must treat as a distinct message to dedup against. */
+ * including redeliveries, which consumers must treat as a distinct message to dedup against.
+ * `data.startsAt`/`data.endsAt` stay the DEFINITION's values; for recurring events the specific
+ * occurrence's window is carried additively in `data.occurrence`. */
 function buildTransitionMessage(
   event: TimedEventDefinition & { projectId: string },
+  occ: OccurrenceWindow,
   transition: TimedEventTransition,
   now: Date,
 ): WebhookMessage {
+  const data: Record<string, unknown> = {
+    eventId: event.id,
+    name: event.name,
+    startsAt: event.startsAt.toISOString(),
+    endsAt: event.endsAt.toISOString(),
+    multiplier: event.multiplier,
+  }
+  if (event.recurrence !== 'none') {
+    data.occurrence = { startsAt: occ.startsAt.toISOString(), endsAt: occ.endsAt.toISOString() }
+  }
   return {
     messageId: randomUUID(),
     type: `timed_event.${transition}`,
-    data: {
-      eventId: event.id,
-      name: event.name,
-      startsAt: event.startsAt.toISOString(),
-      endsAt: event.endsAt.toISOString(),
-      multiplier: event.multiplier,
-    },
+    data,
     createdAt: now.toISOString(),
   }
 }
@@ -195,12 +204,14 @@ export function startLifecycleScheduler(opts: {
     try {
       const events = await configStore.getAllTimedEvents()
       for (const event of events) {
-        const state = timedEventState(event, now)
-        const transitions = reachedTransitions(state)
+        if (!event.enabled) continue // draft fires nothing
+        const occ = transitionOccurrence(event, now)
+        if (!occ) continue
+        const transitions = reachedTransitionsFor(occ, now, event.endingSoonMinutes)
         for (const transition of transitions) {
-          const claimed = await deliveryStore.claimTransition(event.projectId, event.id, transition)
+          const claimed = await deliveryStore.claimTransition(event.projectId, event.id, occ.key, transition)
           if (!claimed) continue
-          await dispatcher.deliverTransition(event.projectId, event.id, transition, buildTransitionMessage(event, transition, now))
+          await dispatcher.deliverTransition(event.projectId, event.id, occ.key, transition, buildTransitionMessage(event, occ, transition, now))
         }
       }
     } catch (err) {
@@ -213,23 +224,25 @@ export function startLifecycleScheduler(opts: {
       const eventByKey = new Map(events.map((event) => [`${event.projectId}:${event.id}`, event]))
       const staleClaims = await deliveryStore.findStaleClaims(new Date(now.getTime() - redeliveryGraceMs), MAX_REDELIVERY_ATTEMPTS)
       for (const claim of staleClaims) {
-        await deliveryStore.incrementAttempts(claim.projectId, claim.eventId, claim.transition)
+        await deliveryStore.incrementAttempts(claim.projectId, claim.eventId, claim.occurrenceKey, claim.transition)
         const event = eventByKey.get(`${claim.projectId}:${claim.eventId}`)
-        if (!event) {
-          // The event definition scrolled out of the scan window (or was deleted) before we
-          // could redrive it — nothing left to rebuild the message from. Dead-letter it and
-          // stop retrying rather than leaving it stale forever.
+        // Rebuild the occurrence from the claim's key: null means the event definition scrolled
+        // out of the scan window / was deleted, or its recurrence changed so the key no longer
+        // lands on an existing occurrence. Either way there is nothing left to rebuild the
+        // message from — dead-letter it and stop retrying rather than leaving it stale forever.
+        const occ = event ? occurrenceFromKey(event, claim.occurrenceKey) : null
+        if (!event || !occ) {
           await deliveryStore.recordDeadLetter(
             claim.projectId,
             '<unresolvable>',
             JSON.stringify(claim),
-            'event definition no longer in scan window',
+            event ? 'occurrence key no longer resolves to an occurrence' : 'event definition no longer in scan window',
             now,
           )
-          await deliveryStore.markDelivered(claim.projectId, claim.eventId, claim.transition)
+          await deliveryStore.markDelivered(claim.projectId, claim.eventId, claim.occurrenceKey, claim.transition)
           continue
         }
-        await dispatcher.deliverTransition(claim.projectId, claim.eventId, claim.transition, buildTransitionMessage(event, claim.transition, now))
+        await dispatcher.deliverTransition(claim.projectId, claim.eventId, claim.occurrenceKey, claim.transition, buildTransitionMessage(event, occ, claim.transition, now))
       }
     } catch (err) {
       logger.error({ err }, 'lifecycle scheduler: redelivery sweep failed')
@@ -249,7 +262,7 @@ export function startLifecycleScheduler(opts: {
             'redelivery attempts exhausted',
             now,
           )
-          await deliveryStore.markDelivered(claim.projectId, claim.eventId, claim.transition)
+          await deliveryStore.markDelivered(claim.projectId, claim.eventId, claim.occurrenceKey, claim.transition)
           logger.warn({ claim }, 'lifecycle scheduler: redelivery attempts exhausted, dead-lettering claim')
         } catch (err) {
           logger.error({ err, claim }, 'lifecycle scheduler: failed to dead-letter exhausted claim')

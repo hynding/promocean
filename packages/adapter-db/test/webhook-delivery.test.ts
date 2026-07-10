@@ -15,10 +15,50 @@ afterAll(async () => { await db.$client.end(); await container.stop() })
 describe('PgWebhookDeliveryStore', () => {
   it('claims a transition exactly once', async () => {
     const store = new PgWebhookDeliveryStore(db)
-    expect(await store.claimTransition('p1', 'e1', 'live')).toBe(true)
-    expect(await store.claimTransition('p1', 'e1', 'live')).toBe(false)
-    expect(await store.claimTransition('p1', 'e1', 'ended')).toBe(true)
-    expect(await store.claimTransition('p2', 'e1', 'live')).toBe(true)
+    expect(await store.claimTransition('p1', 'e1', '', 'live')).toBe(true)
+    expect(await store.claimTransition('p1', 'e1', '', 'live')).toBe(false)
+    expect(await store.claimTransition('p1', 'e1', '', 'ended')).toBe(true)
+    expect(await store.claimTransition('p2', 'e1', '', 'live')).toBe(true)
+  })
+
+  it('claims the same (project, event, transition) independently per occurrence key', async () => {
+    const store = new PgWebhookDeliveryStore(db)
+    // Two occurrences of a recurring event: same project/event/transition, different keys.
+    const k1 = '2026-01-01T00:00:00.000Z'
+    const k2 = '2026-01-08T00:00:00.000Z'
+    expect(await store.claimTransition('p-occ', 'rec', k1, 'live')).toBe(true)
+    expect(await store.claimTransition('p-occ', 'rec', k2, 'live')).toBe(true)
+    // Each key is claimable exactly once.
+    expect(await store.claimTransition('p-occ', 'rec', k1, 'live')).toBe(false)
+    expect(await store.claimTransition('p-occ', 'rec', k2, 'live')).toBe(false)
+    // The empty-key ('' — a non-recurring occurrence) coexists with ISO-keyed claims.
+    expect(await store.claimTransition('p-occ', 'rec', '', 'live')).toBe(true)
+    expect(await store.claimTransition('p-occ', 'rec', '', 'live')).toBe(false)
+    const { rows } = await db.$client.query(
+      `select count(*)::int as n from runtime.timed_event_notifications where project_id='p-occ' and event_id='rec' and transition='live'`,
+    )
+    expect(rows[0].n).toBe(3)
+  })
+
+  it('markDelivered and incrementAttempts hit only the addressed occurrence key', async () => {
+    const store = new PgWebhookDeliveryStore(db)
+    const kA = 'occ-A'
+    const kB = 'occ-B'
+    await store.claimTransition('p-key', 'e-key', kA, 'live')
+    await store.claimTransition('p-key', 'e-key', kB, 'live')
+
+    // Deliver only kA; kB stays undelivered.
+    await store.markDelivered('p-key', 'e-key', kA, 'live')
+    // Increment attempts only on kB; kA stays at 0.
+    await store.incrementAttempts('p-key', 'e-key', kB, 'live')
+
+    const { rows } = await db.$client.query(
+      `select occurrence_key, delivered_at, attempts from runtime.timed_event_notifications where project_id='p-key' and event_id='e-key' and transition='live' order by occurrence_key`,
+    )
+    expect(rows.map((r: any) => ({ occurrence_key: r.occurrence_key, delivered: r.delivered_at !== null, attempts: r.attempts }))).toEqual([
+      { occurrence_key: 'occ-A', delivered: true, attempts: 0 },
+      { occurrence_key: 'occ-B', delivered: false, attempts: 1 },
+    ])
   })
   it('records dead letters', async () => {
     const store = new PgWebhookDeliveryStore(db)
@@ -29,8 +69,8 @@ describe('PgWebhookDeliveryStore', () => {
 
   it('markDelivered sets delivered_at on the claim row and is idempotent', async () => {
     const store = new PgWebhookDeliveryStore(db)
-    await store.claimTransition('p-md', 'e-md', 'live')
-    await store.markDelivered('p-md', 'e-md', 'live')
+    await store.claimTransition('p-md', 'e-md', '', 'live')
+    await store.markDelivered('p-md', 'e-md', '', 'live')
     const { rows: rows1 } = await db.$client.query(
       `select delivered_at from runtime.timed_event_notifications where project_id='p-md' and event_id='e-md' and transition='live'`,
     )
@@ -39,7 +79,7 @@ describe('PgWebhookDeliveryStore', () => {
     // Idempotent: calling again on an already-delivered row is a no-op update, not an error.
     // Wait a bit to ensure any clock advancement would be visible if idempotency failed.
     await new Promise((resolve) => setTimeout(resolve, 20))
-    await store.markDelivered('p-md', 'e-md', 'live')
+    await store.markDelivered('p-md', 'e-md', '', 'live')
     const { rows: rows2 } = await db.$client.query(
       `select delivered_at from runtime.timed_event_notifications where project_id='p-md' and event_id='e-md' and transition='live'`,
     )
@@ -50,9 +90,9 @@ describe('PgWebhookDeliveryStore', () => {
 
   it('incrementAttempts increments the attempts counter', async () => {
     const store = new PgWebhookDeliveryStore(db)
-    await store.claimTransition('p-ia', 'e-ia', 'live')
-    await store.incrementAttempts('p-ia', 'e-ia', 'live')
-    await store.incrementAttempts('p-ia', 'e-ia', 'live')
+    await store.claimTransition('p-ia', 'e-ia', '', 'live')
+    await store.incrementAttempts('p-ia', 'e-ia', '', 'live')
+    await store.incrementAttempts('p-ia', 'e-ia', '', 'live')
     const { rows } = await db.$client.query(
       `select attempts from runtime.timed_event_notifications where project_id='p-ia' and event_id='e-ia' and transition='live'`,
     )
@@ -80,15 +120,25 @@ describe('PgWebhookDeliveryStore', () => {
       `insert into runtime.timed_event_notifications (project_id, event_id, transition, fired_at, delivered_at, attempts) values ('p-sc','exhausted','live',$1,null,5)`,
       [old],
     )
-    // stale: old, undelivered, attempts < maxAttempts -> included
+    // stale: old, undelivered, attempts < maxAttempts -> included (default '' occurrence key)
     await db.$client.query(
       `insert into runtime.timed_event_notifications (project_id, event_id, transition, fired_at, delivered_at, attempts) values ('p-sc','stale','live',$1,null,1)`,
       [old],
     )
+    // stale with an explicit occurrence key -> included, and its key comes back on the row.
+    await db.$client.query(
+      `insert into runtime.timed_event_notifications (project_id, event_id, occurrence_key, transition, fired_at, delivered_at, attempts) values ('p-sc','stale','occ-1','live',$1,null,2)`,
+      [old],
+    )
 
     const staleClaims = await store.findStaleClaims(cutoff, 5)
-    const staleForScope = staleClaims.filter((c) => c.projectId === 'p-sc')
-    expect(staleForScope).toEqual([{ projectId: 'p-sc', eventId: 'stale', transition: 'live', attempts: 1 }])
+    const staleForScope = staleClaims
+      .filter((c) => c.projectId === 'p-sc')
+      .sort((a, b) => a.occurrenceKey.localeCompare(b.occurrenceKey))
+    expect(staleForScope).toEqual([
+      { projectId: 'p-sc', eventId: 'stale', occurrenceKey: '', transition: 'live', attempts: 1 },
+      { projectId: 'p-sc', eventId: 'stale', occurrenceKey: 'occ-1', transition: 'live', attempts: 2 },
+    ])
   })
 
   it('findExhaustedClaims returns only undelivered rows at or above minAttempts', async () => {
@@ -148,15 +198,15 @@ describe('migration 0005 — delivered_at backfill', () => {
 
     // Simulates a claim made before migration 0004 introduced delivered_at: null it out
     // via raw SQL exactly as it would appear on an existing database pre-upgrade.
-    await store.claimTransition('p-bf', 'e-null', 'live')
+    await store.claimTransition('p-bf', 'e-null', '', 'live')
     await db.$client.query(
       `update runtime.timed_event_notifications set fired_at = $1, delivered_at = null where project_id='p-bf' and event_id='e-null' and transition='live'`,
       [firedAt],
     )
 
     // An already-delivered row must be untouched by the backfill.
-    await store.claimTransition('p-bf', 'e-delivered', 'live')
-    await store.markDelivered('p-bf', 'e-delivered', 'live')
+    await store.claimTransition('p-bf', 'e-delivered', '', 'live')
+    await store.markDelivered('p-bf', 'e-delivered', '', 'live')
     const { rows: beforeRows } = await db.$client.query(
       `select delivered_at from runtime.timed_event_notifications where project_id='p-bf' and event_id='e-delivered' and transition='live'`,
     )

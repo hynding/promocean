@@ -7,28 +7,35 @@ import { WebhookDispatcher, resolveScanGraceMinutes, startLifecycleScheduler } f
 import { createApp } from '../src/app.js'
 import { makeFakes } from './fakes.js'
 
+type ClaimRow = { projectId: string; eventId: string; occurrenceKey: string; transition: string }
+
 function makeDeliveryStore() {
   const claimed = new Set<string>()
+  const claims: ClaimRow[] = []
+  const marked: ClaimRow[] = []
   const deadLetters: Array<{ projectId: string; url: string; payload: string; error: string; at: Date }> = []
   const deliveryStore: WebhookDeliveryStore = {
-    claimTransition: async (projectId, eventId, transition) => {
-      const key = `${projectId}:${eventId}:${transition}`
+    claimTransition: async (projectId, eventId, occurrenceKey, transition) => {
+      const key = `${projectId}:${eventId}:${occurrenceKey}:${transition}`
       if (claimed.has(key)) return false
       claimed.add(key)
+      claims.push({ projectId, eventId, occurrenceKey, transition })
       return true
     },
     recordDeadLetter: async (projectId, url, payload, error, at) => {
       deadLetters.push({ projectId, url, payload, error, at })
     },
-    // Safe no-op defaults for tests that don't exercise redelivery/retention directly —
-    // individual tests below override whichever of these they need to assert on.
-    markDelivered: async () => {},
+    // Records delivered claims so occurrence-key back-compat can be asserted; individual tests
+    // below override whichever of these they need to assert on directly.
+    markDelivered: async (projectId, eventId, occurrenceKey, transition) => {
+      marked.push({ projectId, eventId, occurrenceKey, transition })
+    },
     findStaleClaims: async () => [],
     incrementAttempts: async () => {},
     findExhaustedClaims: async () => [],
     deleteDeadLettersBefore: async () => 0,
   }
-  return { deliveryStore, deadLetters }
+  return { deliveryStore, deadLetters, claims, marked }
 }
 
 function makeConfigStore(opts: {
@@ -147,8 +154,8 @@ describe('WebhookDispatcher.deliver — group B (failure handling)', () => {
 describe('WebhookDispatcher.deliverTransition — group B2 (delivered-marking)', () => {
   it('marks the claim delivered once every endpoint has resolved (succeeded or dead-lettered)', async () => {
     const { deliveryStore } = makeDeliveryStore()
-    const marked: Array<[string, string, string]> = []
-    deliveryStore.markDelivered = async (projectId, eventId, transition) => { marked.push([projectId, eventId, transition]) }
+    const marked: Array<[string, string, string, string]> = []
+    deliveryStore.markDelivered = async (projectId, eventId, occurrenceKey, transition) => { marked.push([projectId, eventId, occurrenceKey, transition]) }
     const configStore = makeConfigStore({ endpoints: [endpointA, endpointB] })
     const fetchImpl = vi.fn().mockImplementation((url: string) => {
       if (url === endpointA.url) return Promise.resolve(new Response('', { status: 400 })) // dead-lettered
@@ -156,9 +163,9 @@ describe('WebhookDispatcher.deliverTransition — group B2 (delivered-marking)',
     })
     const dispatcher = new WebhookDispatcher({ configStore, deliveryStore, fetchImpl })
 
-    await dispatcher.deliverTransition('p1', 'e1', 'live', { ...message, type: 'timed_event.live' })
+    await dispatcher.deliverTransition('p1', 'e1', '', 'live', { ...message, type: 'timed_event.live' })
 
-    expect(marked).toEqual([['p1', 'e1', 'live']])
+    expect(marked).toEqual([['p1', 'e1', '', 'live']])
   })
 
   it('leaves the claim unmarked when deliver itself throws (simulated crash before markDelivered)', async () => {
@@ -169,7 +176,7 @@ describe('WebhookDispatcher.deliverTransition — group B2 (delivered-marking)',
     const dispatcher = new WebhookDispatcher({ configStore, deliveryStore, fetchImpl: vi.fn() })
     vi.spyOn(dispatcher, 'deliver').mockRejectedValue(new Error('simulated crash'))
 
-    await expect(dispatcher.deliverTransition('p1', 'e1', 'live', { ...message, type: 'timed_event.live' })).rejects.toThrow('simulated crash')
+    await expect(dispatcher.deliverTransition('p1', 'e1', '', 'live', { ...message, type: 'timed_event.live' })).rejects.toThrow('simulated crash')
 
     expect(marked).toEqual([])
   })
@@ -178,7 +185,7 @@ describe('WebhookDispatcher.deliverTransition — group B2 (delivered-marking)',
 const mkEvent = (over: Partial<TimedEventDefinition> = {}): TimedEventDefinition & { projectId: string } => ({
   id: 'e1', projectId: 'p1', name: 'Summer Sale', description: null,
   startsAt: new Date('2026-07-01T00:00:00Z'), endsAt: new Date('2026-07-31T00:00:00Z'),
-  endingSoonMinutes: 60, multiplier: 2, enabled: true, ...over,
+  endingSoonMinutes: 60, multiplier: 2, enabled: true, recurrence: 'none', recurrenceEndsAt: null, ...over,
 })
 
 type FakeDispatcher = { deliver: ReturnType<typeof vi.fn>; deliverTransition: ReturnType<typeof vi.fn> } & WebhookDispatcher
@@ -208,9 +215,10 @@ describe('startLifecycleScheduler — group C (transition scan)', () => {
     expect(dispatcher.deliverTransition).toHaveBeenCalledTimes(1)
     expect(dispatcher.deliverTransition.mock.calls[0][0]).toBe('p1')
     expect(dispatcher.deliverTransition.mock.calls[0][1]).toBe('e1')
-    expect(dispatcher.deliverTransition.mock.calls[0][2]).toBe('live')
-    expect(dispatcher.deliverTransition.mock.calls[0][3]).toMatchObject({ type: 'timed_event.live' })
-    expect(dispatcher.deliverTransition.mock.calls[0][3].messageId).toMatch(UUID_RE)
+    expect(dispatcher.deliverTransition.mock.calls[0][2]).toBe('') // non-recurring occurrence key
+    expect(dispatcher.deliverTransition.mock.calls[0][3]).toBe('live')
+    expect(dispatcher.deliverTransition.mock.calls[0][4]).toMatchObject({ type: 'timed_event.live' })
+    expect(dispatcher.deliverTransition.mock.calls[0][4].messageId).toMatch(UUID_RE)
 
     await vi.advanceTimersByTimeAsync(1000)
     expect(dispatcher.deliverTransition).toHaveBeenCalledTimes(1) // already claimed, no re-fire
@@ -230,10 +238,10 @@ describe('startLifecycleScheduler — group C (transition scan)', () => {
     await vi.advanceTimersByTimeAsync(1000)
 
     expect(dispatcher.deliverTransition).toHaveBeenCalledTimes(2)
-    expect(dispatcher.deliverTransition.mock.calls[0][3]).toMatchObject({ type: 'timed_event.live' })
-    expect(dispatcher.deliverTransition.mock.calls[1][3]).toMatchObject({ type: 'timed_event.ending_soon' })
+    expect(dispatcher.deliverTransition.mock.calls[0][4]).toMatchObject({ type: 'timed_event.live' })
+    expect(dispatcher.deliverTransition.mock.calls[1][4]).toMatchObject({ type: 'timed_event.ending_soon' })
     // fresh messageId per message, even within the same tick
-    expect(dispatcher.deliverTransition.mock.calls[0][3].messageId).not.toBe(dispatcher.deliverTransition.mock.calls[1][3].messageId)
+    expect(dispatcher.deliverTransition.mock.calls[0][4].messageId).not.toBe(dispatcher.deliverTransition.mock.calls[1][4].messageId)
 
     stop()
   })
@@ -282,6 +290,79 @@ describe('startLifecycleScheduler — group C (transition scan)', () => {
   })
 })
 
+describe('startLifecycleScheduler — group C1b (occurrence-aware claims)', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('claims a non-recurring event under the empty occurrence key (back-compat)', async () => {
+    vi.setSystemTime(new Date('2026-07-15T00:00:00Z'))
+    const event = mkEvent() // recurrence 'none'
+    const configStore = makeConfigStore({ allTimedEvents: [event] })
+    const { deliveryStore, claims } = makeDeliveryStore()
+    const dispatcher = fakeDispatcher()
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(claims).toEqual([{ projectId: 'p1', eventId: 'e1', occurrenceKey: '', transition: 'live' }])
+    // occurrence key is threaded all the way through delivery -> markDelivered
+    expect(dispatcher.deliverTransition.mock.calls[0][2]).toBe('')
+  })
+
+  it('rolls occurrence claims: occurrence 1 fires its full lifecycle under K1, then occurrence 2 claims a fresh live under K2', async () => {
+    // daily, 1-hour occurrences; occ1 = Jul 1 00:00-01:00 (key K1), occ2 = Jul 2 00:00-01:00 (K2)
+    const event = mkEvent({
+      recurrence: 'daily',
+      startsAt: new Date('2026-07-01T00:00:00Z'),
+      endsAt: new Date('2026-07-01T01:00:00Z'),
+      endingSoonMinutes: 10,
+    })
+    const configStore = makeConfigStore({ allTimedEvents: [event] })
+    const { deliveryStore, claims, marked } = makeDeliveryStore()
+    // real dispatcher so deliverTransition -> markDelivered records the delivered occurrence keys
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('', { status: 200 }))
+    const dispatcher = new WebhookDispatcher({ configStore, deliveryStore, fetchImpl })
+
+    const k1 = '2026-07-01T00:00:00.000Z'
+    const k2 = '2026-07-02T00:00:00.000Z'
+
+    // Tick 1: between occurrences (occ1 fully ended, occ2 not started) -> transitionOccurrence
+    // returns the just-elapsed occ1 so its full lifecycle fires.
+    vi.setSystemTime(new Date('2026-07-01T02:00:00Z'))
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(claims.filter((c) => c.occurrenceKey === k1).map((c) => c.transition)).toEqual(['live', 'ending_soon', 'ended'])
+    expect(marked.filter((m) => m.occurrenceKey === k1).map((m) => m.transition)).toEqual(['live', 'ending_soon', 'ended'])
+
+    // Tick 2: inside occurrence 2's live window -> a fresh live claim under K2 only.
+    vi.setSystemTime(new Date('2026-07-02T00:30:00Z'))
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(claims.filter((c) => c.occurrenceKey === k2).map((c) => c.transition)).toEqual(['live'])
+    // K1 rows are untouched by tick 2 — still exactly the three from occurrence 1, all delivered.
+    expect(claims.filter((c) => c.occurrenceKey === k1)).toHaveLength(3)
+    expect(marked.filter((m) => m.occurrenceKey === k1)).toHaveLength(3)
+  })
+
+  it('fires nothing for a disabled recurring event', async () => {
+    vi.setSystemTime(new Date('2026-07-15T00:00:00Z'))
+    const event = mkEvent({ recurrence: 'daily', enabled: false })
+    const configStore = makeConfigStore({ allTimedEvents: [event] })
+    const { deliveryStore, claims } = makeDeliveryStore()
+    const dispatcher = fakeDispatcher()
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(claims).toEqual([])
+    expect(dispatcher.deliverTransition).not.toHaveBeenCalled()
+  })
+})
+
 describe('startLifecycleScheduler — group C2 (redelivery sweep)', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
@@ -312,11 +393,11 @@ describe('startLifecycleScheduler — group C2 (redelivery sweep)', () => {
     const { deliveryStore } = makeDeliveryStore()
     deliveryStore.claimTransition = async () => false // already claimed by an earlier tick
     const incremented: unknown[] = []
-    deliveryStore.incrementAttempts = async (projectId, eventId, transition) => { incremented.push([projectId, eventId, transition]) }
+    deliveryStore.incrementAttempts = async (projectId, eventId, occurrenceKey, transition) => { incremented.push([projectId, eventId, occurrenceKey, transition]) }
     const marked: unknown[] = []
-    deliveryStore.markDelivered = async (projectId, eventId, transition) => { marked.push([projectId, eventId, transition]) }
+    deliveryStore.markDelivered = async (projectId, eventId, occurrenceKey, transition) => { marked.push([projectId, eventId, occurrenceKey, transition]) }
     deliveryStore.findStaleClaims = vi.fn()
-      .mockResolvedValueOnce([{ projectId: 'p1', eventId: 'e1', transition: 'live', attempts: 2 }])
+      .mockResolvedValueOnce([{ projectId: 'p1', eventId: 'e1', occurrenceKey: '', transition: 'live', attempts: 2 }])
       .mockResolvedValue([])
     const fetchImpl = vi.fn().mockResolvedValue(new Response('', { status: 200 }))
     const dispatcher = new WebhookDispatcher({ configStore, deliveryStore, fetchImpl })
@@ -325,13 +406,13 @@ describe('startLifecycleScheduler — group C2 (redelivery sweep)', () => {
     await vi.advanceTimersByTimeAsync(1000)
     stop()
 
-    expect(incremented).toEqual([['p1', 'e1', 'live']])
+    expect(incremented).toEqual([['p1', 'e1', '', 'live']])
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     const rawBody = (fetchImpl.mock.calls[0][1] as RequestInit).body as string
     const body = JSON.parse(rawBody)
     expect(body.type).toBe('timed_event.live')
     expect(body.messageId).toMatch(UUID_RE)
-    expect(marked).toEqual([['p1', 'e1', 'live']])
+    expect(marked).toEqual([['p1', 'e1', '', 'live']])
   })
 
   it('rebuilds the message with a fresh messageId on every redelivery attempt', async () => {
@@ -340,10 +421,10 @@ describe('startLifecycleScheduler — group C2 (redelivery sweep)', () => {
     const configStore = makeConfigStore({ allTimedEvents: [event] })
     const { deliveryStore } = makeDeliveryStore()
     deliveryStore.claimTransition = async () => false
-    deliveryStore.findStaleClaims = async () => [{ projectId: 'p1', eventId: 'e1', transition: 'live', attempts: 1 }]
+    deliveryStore.findStaleClaims = async () => [{ projectId: 'p1', eventId: 'e1', occurrenceKey: '', transition: 'live', attempts: 1 }]
     const messageIds: string[] = []
     const dispatcher = fakeDispatcher(async (..._args: unknown[]) => {
-      const msg = _args[3] as WebhookMessage
+      const msg = _args[4] as WebhookMessage
       messageIds.push(msg.messageId)
     })
 
@@ -363,8 +444,8 @@ describe('startLifecycleScheduler — group C2 (redelivery sweep)', () => {
     const configStore = makeConfigStore({ allTimedEvents: [] })
     const { deliveryStore, deadLetters } = makeDeliveryStore()
     const marked: unknown[] = []
-    deliveryStore.markDelivered = async (projectId, eventId, transition) => { marked.push([projectId, eventId, transition]) }
-    deliveryStore.findStaleClaims = async () => [{ projectId: 'p1', eventId: 'gone-1', transition: 'ended', attempts: 3 }]
+    deliveryStore.markDelivered = async (projectId, eventId, occurrenceKey, transition) => { marked.push([projectId, eventId, occurrenceKey, transition]) }
+    deliveryStore.findStaleClaims = async () => [{ projectId: 'p1', eventId: 'gone-1', occurrenceKey: '', transition: 'ended', attempts: 3 }]
     const dispatcher = fakeDispatcher()
 
     const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
@@ -374,8 +455,65 @@ describe('startLifecycleScheduler — group C2 (redelivery sweep)', () => {
     expect(dispatcher.deliverTransition).not.toHaveBeenCalled()
     expect(deadLetters).toHaveLength(1)
     expect(deadLetters[0]).toMatchObject({ projectId: 'p1', url: '<unresolvable>', error: 'event definition no longer in scan window' })
-    expect(JSON.parse(deadLetters[0].payload)).toEqual({ projectId: 'p1', eventId: 'gone-1', transition: 'ended', attempts: 3 })
-    expect(marked).toEqual([['p1', 'gone-1', 'ended']])
+    expect(JSON.parse(deadLetters[0].payload)).toEqual({ projectId: 'p1', eventId: 'gone-1', occurrenceKey: '', transition: 'ended', attempts: 3 })
+    expect(marked).toEqual([['p1', 'gone-1', '', 'ended']])
+  })
+
+  it('rebuilds a recurring redelivery with the occurrence payload derived from its ISO key', async () => {
+    vi.setSystemTime(new Date('2026-07-05T00:10:00Z'))
+    // daily, 1-hour occurrences; occ2 (index 2) = Jul 3 00:00-01:00
+    const event = mkEvent({
+      recurrence: 'daily',
+      startsAt: new Date('2026-07-01T00:00:00Z'),
+      endsAt: new Date('2026-07-01T01:00:00Z'),
+    })
+    const configStore = makeConfigStore({ allTimedEvents: [event], endpoints: [endpointA] })
+    const { deliveryStore } = makeDeliveryStore()
+    deliveryStore.claimTransition = async () => false
+    deliveryStore.findStaleClaims = vi.fn()
+      .mockResolvedValueOnce([{ projectId: 'p1', eventId: 'e1', occurrenceKey: '2026-07-03T00:00:00.000Z', transition: 'ended', attempts: 1 }])
+      .mockResolvedValue([])
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('', { status: 200 }))
+    const dispatcher = new WebhookDispatcher({ configStore, deliveryStore, fetchImpl })
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const body = JSON.parse((fetchImpl.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.type).toBe('timed_event.ended')
+    // definition bounds stay the definition's own values...
+    expect(body.data.startsAt).toBe('2026-07-01T00:00:00.000Z')
+    expect(body.data.endsAt).toBe('2026-07-01T01:00:00.000Z')
+    // ...while the specific occurrence's window is carried additively.
+    expect(body.data.occurrence).toEqual({ startsAt: '2026-07-03T00:00:00.000Z', endsAt: '2026-07-03T01:00:00.000Z' })
+  })
+
+  it('dead-letters a recurring stale claim whose occurrence key no longer resolves to an occurrence', async () => {
+    vi.setSystemTime(new Date('2026-07-05T00:10:00Z'))
+    const event = mkEvent({
+      recurrence: 'daily',
+      startsAt: new Date('2026-07-01T00:00:00Z'),
+      endsAt: new Date('2026-07-01T01:00:00Z'),
+    })
+    const configStore = makeConfigStore({ allTimedEvents: [event] })
+    const { deliveryStore, deadLetters } = makeDeliveryStore()
+    deliveryStore.claimTransition = async () => false // isolate the redelivery sweep from phase-1 scan
+    const marked: unknown[] = []
+    deliveryStore.markDelivered = async (projectId, eventId, occurrenceKey, transition) => { marked.push([projectId, eventId, occurrenceKey, transition]) }
+    // 00:30 is misaligned — daily occurrences start at 00:00, so this key resolves to null.
+    deliveryStore.findStaleClaims = async () => [{ projectId: 'p1', eventId: 'e1', occurrenceKey: '2026-07-03T00:30:00.000Z', transition: 'ended', attempts: 1 }]
+    const dispatcher = fakeDispatcher()
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(dispatcher.deliverTransition).not.toHaveBeenCalled()
+    expect(deadLetters).toHaveLength(1)
+    expect(deadLetters[0]).toMatchObject({ projectId: 'p1', url: '<unresolvable>', error: 'occurrence key no longer resolves to an occurrence' })
+    expect(marked).toEqual([['p1', 'e1', '2026-07-03T00:30:00.000Z', 'ended']])
   })
 })
 
@@ -390,9 +528,9 @@ describe('startLifecycleScheduler — group C2b (exhaustion sweep)', () => {
     const configStore = makeConfigStore({ allTimedEvents: [] })
     const { deliveryStore, deadLetters } = makeDeliveryStore()
     const marked: unknown[] = []
-    deliveryStore.markDelivered = async (projectId, eventId, transition) => { marked.push([projectId, eventId, transition]) }
+    deliveryStore.markDelivered = async (projectId, eventId, occurrenceKey, transition) => { marked.push([projectId, eventId, occurrenceKey, transition]) }
     deliveryStore.findExhaustedClaims = vi.fn()
-      .mockResolvedValueOnce([{ projectId: 'p1', eventId: 'e1', transition: 'live', attempts: 5 }])
+      .mockResolvedValueOnce([{ projectId: 'p1', eventId: 'e1', occurrenceKey: '', transition: 'live', attempts: 5 }])
       .mockResolvedValue([])
     const dispatcher = fakeDispatcher()
 
@@ -403,8 +541,8 @@ describe('startLifecycleScheduler — group C2b (exhaustion sweep)', () => {
     expect(dispatcher.deliverTransition).not.toHaveBeenCalled()
     expect(deadLetters).toHaveLength(1)
     expect(deadLetters[0]).toMatchObject({ projectId: 'p1', url: '<exhausted>', error: 'redelivery attempts exhausted' })
-    expect(JSON.parse(deadLetters[0].payload)).toEqual({ projectId: 'p1', eventId: 'e1', transition: 'live', attempts: 5 })
-    expect(marked).toEqual([['p1', 'e1', 'live']])
+    expect(JSON.parse(deadLetters[0].payload)).toEqual({ projectId: 'p1', eventId: 'e1', occurrenceKey: '', transition: 'live', attempts: 5 })
+    expect(marked).toEqual([['p1', 'e1', '', 'live']])
   })
 
   it('calls findExhaustedClaims with MAX_REDELIVERY_ATTEMPTS (5)', async () => {
@@ -427,12 +565,12 @@ describe('startLifecycleScheduler — group C2b (exhaustion sweep)', () => {
     const configStore = makeConfigStore()
     const { deliveryStore } = makeDeliveryStore()
     const marked: unknown[] = []
-    deliveryStore.markDelivered = async (projectId, eventId, transition) => { marked.push([projectId, eventId, transition]) }
+    deliveryStore.markDelivered = async (projectId, eventId, occurrenceKey, transition) => { marked.push([projectId, eventId, occurrenceKey, transition]) }
     let call = 0
     deliveryStore.recordDeadLetter = async () => { call++; if (call === 1) throw new Error('db down') }
     deliveryStore.findExhaustedClaims = vi.fn().mockResolvedValueOnce([
-      { projectId: 'p1', eventId: 'e-fail', transition: 'live', attempts: 5 },
-      { projectId: 'p1', eventId: 'e-ok', transition: 'live', attempts: 5 },
+      { projectId: 'p1', eventId: 'e-fail', occurrenceKey: '', transition: 'live', attempts: 5 },
+      { projectId: 'p1', eventId: 'e-ok', occurrenceKey: '', transition: 'live', attempts: 5 },
     ]).mockResolvedValue([])
     const dispatcher = fakeDispatcher()
     const testLogger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() } as unknown as Logger
@@ -442,7 +580,7 @@ describe('startLifecycleScheduler — group C2b (exhaustion sweep)', () => {
     stop()
 
     // the failing claim is not marked delivered, but the second claim still is
-    expect(marked).toEqual([['p1', 'e-ok', 'live']])
+    expect(marked).toEqual([['p1', 'e-ok', '', 'live']])
     expect(testLogger.error).toHaveBeenCalled()
   })
 })

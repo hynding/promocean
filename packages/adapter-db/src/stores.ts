@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
-import { applyStreak, couponCodeFromBytes, decideClaim, type EngagementStore, type EngagementWrite, type ErasureStore, type EventStore, type IngestionStore, type OfferMetricsStore, type ProgressStore, type RewardDefinition, type RewardStore, type Scope, type StatsStore, type StreakState, type TimedEventTransition, type UsageStore, type WebhookDeliveryStore } from '@promocean/core'
+import { applyStreak, couponCodeFromBytes, decideClaim, type AchievementDefinition, type BackfillStore, type EngagementStore, type EngagementWrite, type ErasureStore, type EventStore, type IngestionStore, type OfferMetricsStore, type ProgressStore, type RewardDefinition, type RewardStore, type Scope, type StatsStore, type StreakState, type TimedEventTransition, type UsageStore, type WebhookDeliveryStore } from '@promocean/core'
 import { achievementProgress, coupons, events, monthlyActiveUsers, offerEvents, pointsLedger, timedEventNotifications, unlocks, usageCounters, userStreaks, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
 
@@ -274,6 +274,22 @@ const rangeConds = (col: { name?: string } & Parameters<typeof gte>[0], range: {
   return conds
 }
 
+/**
+ * Groups the flat window list by eventId while preserving first-seen order, so a single event
+ * with several occurrence windows collapses to one output row whose participant count unions all
+ * of its windows.
+ */
+type TimedEventWindow = { eventId: string; startsAt: Date; endsAt: Date }
+const groupWindowsByEvent = (windows: TimedEventWindow[]): Map<string, TimedEventWindow[]> => {
+  const byEvent = new Map<string, TimedEventWindow[]>()
+  for (const w of windows) {
+    const existing = byEvent.get(w.eventId)
+    if (existing) existing.push(w)
+    else byEvent.set(w.eventId, [w])
+  }
+  return byEvent
+}
+
 export class PgStatsStore implements StatsStore {
   constructor(private db: Db) {}
   async getStats(
@@ -292,17 +308,18 @@ export class PgStatsStore implements StatsStore {
         .from(offerEvents)
         .where(and(scoped(offerEvents, scope), ...rangeConds(offerEvents.createdAt, range)))
         .groupBy(offerEvents.offerId, offerEvents.kind),
-      Promise.all(timedEventWindows.map(async (w) => {
-        // Range intersected with window: GREATEST/LEAST ignore null args, so a null
-        // range.from/to simply falls back to the window's own bound.
+      Promise.all([...groupWindowsByEvent(timedEventWindows)].map(async ([eventId, windows]) => {
+        // Participants per event = distinct users active in ANY of that event's windows: OR the
+        // per-window predicates so a user active in two occurrences counts once. Range intersected
+        // with each window: GREATEST/LEAST ignore null args, so a null range.from/to simply falls
+        // back to the window's own bound.
+        const windowConds = windows.map((w) => sql`(occurred_at between GREATEST(${w.startsAt}::timestamptz, ${range.from}::timestamptz) and LEAST(${w.endsAt}::timestamptz, ${range.to}::timestamptz))`)
         const result = await this.db.execute<{ n: number }>(sql`
           select count(distinct user_id)::int as n
           from runtime.events
-          where project_id = ${scope.projectId} and environment = ${scope.environment}
-            and occurred_at between GREATEST(${w.startsAt}::timestamptz, ${range.from}::timestamptz)
-                                 and LEAST(${w.endsAt}::timestamptz, ${range.to}::timestamptz)
+          where project_id = ${scope.projectId} and environment = ${scope.environment} and (${sql.join(windowConds, sql` or `)})
         `)
-        return { eventId: w.eventId, participants: Number(result.rows[0]?.n ?? 0) }
+        return { eventId, participants: Number(result.rows[0]?.n ?? 0) }
       })),
       (async () => {
         if (timedEventWindows.length === 0) return 0
@@ -347,9 +364,9 @@ export class PgStatsStore implements StatsStore {
 
 export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
   constructor(private db: Db) {}
-  async claimTransition(projectId: string, eventId: string, transition: TimedEventTransition) {
+  async claimTransition(projectId: string, eventId: string, occurrenceKey: string, transition: TimedEventTransition) {
     const inserted = await this.db.insert(timedEventNotifications)
-      .values({ projectId, eventId, transition })
+      .values({ projectId, eventId, occurrenceKey, transition })
       .onConflictDoNothing()
       .returning({ eventId: timedEventNotifications.eventId })
     return inserted.length > 0
@@ -357,12 +374,13 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
   async recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date) {
     await this.db.insert(webhookDeadLetters).values({ projectId, url, payload, error, createdAt: at })
   }
-  async markDelivered(projectId: string, eventId: string, transition: TimedEventTransition) {
+  async markDelivered(projectId: string, eventId: string, occurrenceKey: string, transition: TimedEventTransition) {
     await this.db.update(timedEventNotifications)
       .set({ deliveredAt: sql`now()` })
       .where(and(
         eq(timedEventNotifications.projectId, projectId),
         eq(timedEventNotifications.eventId, eventId),
+        eq(timedEventNotifications.occurrenceKey, occurrenceKey),
         eq(timedEventNotifications.transition, transition),
         isNull(timedEventNotifications.deliveredAt),
       ))
@@ -371,6 +389,7 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
     const rows = await this.db.select({
       projectId: timedEventNotifications.projectId,
       eventId: timedEventNotifications.eventId,
+      occurrenceKey: timedEventNotifications.occurrenceKey,
       transition: timedEventNotifications.transition,
       attempts: timedEventNotifications.attempts,
     }).from(timedEventNotifications)
@@ -381,12 +400,13 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
       ))
     return rows.map((r) => ({ ...r, transition: r.transition as TimedEventTransition }))
   }
-  async incrementAttempts(projectId: string, eventId: string, transition: TimedEventTransition) {
+  async incrementAttempts(projectId: string, eventId: string, occurrenceKey: string, transition: TimedEventTransition) {
     await this.db.update(timedEventNotifications)
       .set({ attempts: sql`${timedEventNotifications.attempts} + 1` })
       .where(and(
         eq(timedEventNotifications.projectId, projectId),
         eq(timedEventNotifications.eventId, eventId),
+        eq(timedEventNotifications.occurrenceKey, occurrenceKey),
         eq(timedEventNotifications.transition, transition),
       ))
   }
@@ -394,6 +414,7 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
     const rows = await this.db.select({
       projectId: timedEventNotifications.projectId,
       eventId: timedEventNotifications.eventId,
+      occurrenceKey: timedEventNotifications.occurrenceKey,
       transition: timedEventNotifications.transition,
       attempts: timedEventNotifications.attempts,
     }).from(timedEventNotifications)
@@ -613,6 +634,115 @@ export class PgRewardStore implements RewardStore {
       `)
       if (existing.rows.length === 0) return { ok: false as const, reason: 'not_found' as const }
       return { ok: false as const, reason: 'already_redeemed' as const }
+    })
+  }
+}
+
+/**
+ * Retroactively applies an achievement definition against already-stored events — the path a
+ * newly-created (or newly-eligible) achievement takes so historical activity counts toward it.
+ *
+ * The whole run is one transaction guarded by a TRY advisory lock keyed on
+ * (project+environment, 'backfill:' + def.id): a concurrent backfill of the same definition does
+ * NOT queue on the lock (which would stack pool connections and starve DB-backed endpoints) —
+ * it returns { ok: false, reason: 'backfill_in_progress' } immediately and commits its empty
+ * transaction. Live ingestion NEVER takes this lock — so a concurrent ingestEvent can race us. Two
+ * belts guard that race: the progress upsert wraps its target-clamped value in GREATEST so a
+ * concurrent live increment is never lowered, and the unlock insert is onConflictDoNothing so only
+ * one of {backfill, ingest} wins the row and writes the single unlock bonus.
+ */
+export class PgBackfillStore implements BackfillStore {
+  constructor(private db: Db) {}
+  async backfillAchievement(scope: Scope, def: AchievementDefinition) {
+    return this.db.transaction(async (tx) => {
+      const ns = `${scope.projectId}:${scope.environment}`
+      const [lockRow] = (await tx.execute<{ locked: boolean }>(
+        sql`SELECT pg_try_advisory_xact_lock(hashtext(${ns}), hashtext(${'backfill:' + def.id})) AS locked`,
+      )).rows
+      if (!lockRow?.locked) {
+        // Another backfill of this achievement holds the lock — bail without waiting. The empty
+        // transaction commits cleanly (nothing was written), leaving the running backfill alone.
+        return { ok: false as const, reason: 'backfill_in_progress' as const }
+      }
+
+      const aggregate = await tx.execute<{ user_id: string; cnt: number }>(sql`
+        SELECT user_id, COUNT(*)::int AS cnt
+        FROM runtime.events
+        WHERE project_id = ${scope.projectId} AND environment = ${scope.environment} AND type = ${def.eventType}
+        GROUP BY user_id
+      `)
+      const rows = aggregate.rows
+      const usersEvaluated = rows.length
+      // Empty aggregate: nothing to evaluate, so return an all-zero summary without any writes.
+      if (usersEvaluated === 0) {
+        return { ok: true as const, usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 }
+      }
+
+      const userIds = rows.map((r) => r.user_id)
+      const existingRows = await tx.select({
+        userId: achievementProgress.userId,
+        current: achievementProgress.current,
+      })
+        .from(achievementProgress)
+        .where(and(
+          scoped(achievementProgress, scope),
+          eq(achievementProgress.achievementId, def.id),
+          inArray(achievementProgress.userId, userIds),
+        ))
+      const existing = new Map(existingRows.map((r) => [r.userId, r.current]))
+
+      // Every unlock granted in this run shares one instant, exactly as PgIngestionStore does.
+      const unlockedAt = new Date()
+      let progressRaised = 0
+      let unlocksGranted = 0
+      let pointsAwarded = 0
+
+      for (const r of rows) {
+        const cnt = r.cnt
+        const desired = Math.min(cnt, def.targetCount)
+        const prev = existing.get(r.user_id) ?? 0
+        // Only raise progress where the retroactive count actually exceeds what's stored — a live
+        // (possibly multiplier-inflated) value at or above `desired` is left untouched, so it does
+        // not count toward progressRaised.
+        if (desired > prev) {
+          await tx.insert(achievementProgress)
+            .values({ ...scope, userId: r.user_id, achievementId: def.id, current: desired })
+            .onConflictDoUpdate({
+              target: [achievementProgress.projectId, achievementProgress.environment, achievementProgress.userId, achievementProgress.achievementId],
+              // GREATEST belts the live-ingest race: a concurrent increment that landed after our
+              // read is never lowered by this write.
+              set: {
+                current: sql`GREATEST(${achievementProgress.current}, LEAST(${cnt}::int, ${def.targetCount}::int))`,
+                updatedAt: sql`now()`,
+              },
+            })
+          progressRaised++
+        }
+
+        if (cnt >= def.targetCount) {
+          const insertedUnlock = await tx.insert(unlocks)
+            .values({ ...scope, userId: r.user_id, achievementId: def.id, unlockedAt })
+            .onConflictDoNothing()
+            .returning({ achievementId: unlocks.achievementId })
+          if (insertedUnlock.length > 0) {
+            unlocksGranted++
+            // Gated exactly as PgIngestionStore: award the unlock bonus only for a genuinely new
+            // unlock row AND a positive point value. A zero-point achievement grants no ledger row.
+            if (def.pointsValue > 0) {
+              await tx.insert(pointsLedger).values({
+                ...scope,
+                userId: r.user_id,
+                delta: def.pointsValue,
+                source: 'unlock',
+                sourceRef: def.id,
+              })
+              pointsAwarded += def.pointsValue
+            }
+          }
+        }
+      }
+
+      return { ok: true as const, usersEvaluated, progressRaised, unlocksGranted, pointsAwarded }
     })
   }
 }

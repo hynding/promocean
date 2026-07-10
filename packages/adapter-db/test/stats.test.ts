@@ -149,3 +149,42 @@ describe('PgStatsStore', () => {
     expect(stats.offers).toEqual([{ offerId: 'o1', impressions: 1, clicks: 0 }])
   })
 })
+
+describe('PgStatsStore multi-window (recurring occurrences)', () => {
+  // Isolated tenant so these inserts don't perturb the shared p1/p2 fixtures.
+  const p3: Scope = { projectId: 'p3', environment: 'test' }
+  // One recurring event 'multi' with two occurrence windows: [d1,d2] and [d3,d4].
+  const wa = { eventId: 'multi', startsAt: d1, endsAt: d2 }
+  const wb = { eventId: 'multi', startsAt: d3, endsAt: d4 }
+
+  beforeAll(async () => {
+    const insertEvent = (userId: string, idem: string, occurredAt: Date) =>
+      db.$client.query(
+        `insert into runtime.events (project_id, environment, user_id, type, idempotency_key, occurred_at) values ($1,$2,$3,$4,$5,$6)`,
+        [p3.projectId, p3.environment, userId, 'lesson_completed', idem, occurredAt],
+      )
+    // u-both is active in BOTH occurrence windows; u-a only in the first, u-b only in the second.
+    await insertEvent('u-both', 'm1', d1)
+    await insertEvent('u-both', 'm2', d3)
+    await insertEvent('u-a', 'm3', d2)
+    await insertEvent('u-b', 'm4', d4)
+  })
+
+  it('counts a user active in two windows of the same event exactly once', async () => {
+    const store = new PgStatsStore(db)
+    const stats = await store.getStats(p3, { from: null, to: null }, [wa, wb])
+
+    // Two windows collapse to a single 'multi' row; u-both counted once → 3 distinct participants.
+    expect(stats.timedEvents).toEqual([{ eventId: 'multi', participants: 3 }])
+    // Union of both windows is likewise 3 (u-both, u-a, u-b).
+    expect(stats.totals.timedEventParticipants).toBe(3)
+  })
+
+  it('counts users active in different windows of the same event (both included)', async () => {
+    const store = new PgStatsStore(db)
+    // Restrict range to the SECOND window only: u-both (d3) and u-b (d4) qualify; u-a (d2) drops.
+    const stats = await store.getStats(p3, { from: d3, to: d4 }, [wa, wb])
+    expect(stats.timedEvents).toEqual([{ eventId: 'multi', participants: 2 }])
+    expect(stats.totals.timedEventParticipants).toBe(2)
+  })
+})

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { statsQuerySchema, type StatsResponse } from '@promocean/contracts'
-import type { Scope, TimedEventDefinition } from '@promocean/core'
+import { occurrenceWindowsInRange, type Scope, type TimedEventDefinition } from '@promocean/core'
 import type { AppDeps } from '../app.js'
 import { logger } from '../logger.js'
 
@@ -32,7 +32,17 @@ export function statsRoute(deps: AppDeps) {
         { err }, 'timed events fetch failed; stats serving with empty timed-event windows',
       )
     }
-    const windows = timedEventDefs.map((e) => ({ eventId: e.id, startsAt: e.startsAt, endsAt: e.endsAt }))
+    // Enumerate each event's occurrence windows intersecting the range (recurring events
+    // contribute one window per occurrence). occurrenceWindowsInRange clamps to the most recent
+    // 400 windows per event; the core defaults nulls here to the event's start / now.
+    const now = new Date()
+    const windows = timedEventDefs.flatMap((e) =>
+      occurrenceWindowsInRange(e, from ?? e.startsAt, to ?? now).map((w) => ({
+        eventId: e.id,
+        startsAt: w.startsAt,
+        endsAt: w.endsAt,
+      })),
+    )
 
     const stats = await deps.statsStore.getStats(scope, { from, to }, windows)
 

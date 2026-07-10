@@ -13,5 +13,5 @@ export function createDb(connectionString: string): Db {
   return drizzle(pool) as Db
 }
 export { runMigrations } from './migrate.js'
-export { PgEngagementStore, PgErasureStore, PgEventStore, PgIngestionStore, PgOfferMetricsStore, PgProgressStore, PgRewardStore, PgStatsStore, PgUsageStore, PgWebhookDeliveryStore } from './stores.js'
+export { PgBackfillStore, PgEngagementStore, PgErasureStore, PgEventStore, PgIngestionStore, PgOfferMetricsStore, PgProgressStore, PgRewardStore, PgStatsStore, PgUsageStore, PgWebhookDeliveryStore } from './stores.js'
 export * as schema from './schema.js'

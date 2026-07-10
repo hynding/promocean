@@ -1,5 +1,5 @@
 import type {
-  AchievementDefinition, ApiKeyStore, AuthContext, ConfigStore, EngagementStore, EngagementWrite, ErasureStore,
+  AchievementDefinition, ApiKeyStore, AuthContext, BackfillStore, ConfigStore, EngagementStore, EngagementWrite, ErasureStore,
   IngestionStore, OfferDefinition, OfferMetricsStore, PointRules, ProgressStore, RewardDefinition, RewardStore,
   Scope, StatsStore, TimedEventDefinition,
 } from '@promocean/core'
@@ -176,10 +176,22 @@ export function makeFakes(
   const setValidateResult = (r: ValidateCouponResult) => { validateResult = r }
   const setRedeemResult = (r: RedeemCouponResult) => { redeemResult = r }
 
+  type BackfillResult = Awaited<ReturnType<BackfillStore['backfillAchievement']>>
+  let backfillResult: BackfillResult = { ok: true, usersEvaluated: 0, progressRaised: 0, unlocksGranted: 0, pointsAwarded: 0 }
+  const backfillCalls: Array<{ scope: Scope; def: AchievementDefinition }> = []
+  const backfillStore: BackfillStore = {
+    backfillAchievement: async (scope, def) => {
+      backfillCalls.push({ scope, def })
+      return backfillResult
+    },
+  }
+  const setBackfillResult = (r: BackfillResult) => { backfillResult = r }
+
   return {
     configStore, apiKeyStore, progressStore, ingestionStore, usage, offerMetricsStore, metrics, erasureStore,
     erasedUsers, erasureCounts, statsStore, statsCalls, setStatsResult, engagementCalls,
     engagementStore, setWalletResult, setStreakResult, setLeaderboardResult, leaderboardCalls,
     rewardStore, claimCalls, validateCalls, redeemCalls, setClaimCounts, setClaimResult, setValidateResult, setRedeemResult,
+    backfillStore, backfillCalls, setBackfillResult,
   }
 }

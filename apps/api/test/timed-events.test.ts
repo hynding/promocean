@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OfferDefinition, TimedEventDefinition } from '@promocean/core'
 import { createApp } from '../src/app.js'
 import { logger } from '../src/logger.js'
@@ -7,7 +7,7 @@ import { makeFakes } from './fakes.js'
 const mk = (over: Partial<TimedEventDefinition> = {}): TimedEventDefinition => ({
   id: 'e1', name: 'Summer Sale', description: null,
   startsAt: new Date('2026-07-01T00:00:00Z'), endsAt: new Date('2026-07-31T00:00:00Z'),
-  endingSoonMinutes: 1440, multiplier: 2, enabled: true, ...over,
+  endingSoonMinutes: 1440, multiplier: 2, enabled: true, recurrence: 'none', recurrenceEndsAt: null, ...over,
 })
 
 const defs = [
@@ -88,6 +88,57 @@ describe('GET /v1/events/live', () => {
     expect(scheduledEvent.secondsUntilStart).toBeGreaterThan(0)
     expect(typeof scheduledEvent.secondsUntilEnd).toBe('number')
     expect(scheduledEvent.secondsUntilEnd).toBeGreaterThan(0)
+  })
+
+  it('non-recurring event carries recurrence "none" and a null nextOccurrenceStartsAt', async () => {
+    const live = mk({ id: 'live1', startsAt: new Date('2026-07-01T00:00:00Z'), endsAt: new Date('2026-07-20T00:00:00Z'), endingSoonMinutes: 60 })
+    const fakes = makeFakes([], auth, [], [live])
+    const app = createApp(fakes)
+    const res = await app.request('/v1/events/live', { headers })
+    const json = await res.json()
+    const e = json.events.find((x: { eventId: string }) => x.eventId === 'live1')
+    expect(e.recurrence).toBe('none')
+    expect(e.nextOccurrenceStartsAt).toBeNull()
+    // non-recurring bounds are unchanged (the definition's own window)
+    expect(e.startsAt).toBe('2026-07-01T00:00:00.000Z')
+    expect(e.endsAt).toBe('2026-07-20T00:00:00.000Z')
+  })
+})
+
+describe('GET /v1/events/live — recurring occurrences', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  // daily, 1-hour occurrences: occ0 Jul1 00:00-01:00, occ1 Jul2, occ2 Jul3, ...
+  const daily = () => mk({ id: 'd1', recurrence: 'daily', startsAt: new Date('2026-07-01T00:00:00Z'), endsAt: new Date('2026-07-01T01:00:00Z'), endingSoonMinutes: 10 })
+
+  it('between occurrences: reports the NEXT window as scheduled with the following occurrence as nextOccurrenceStartsAt', async () => {
+    vi.setSystemTime(new Date('2026-07-01T02:00:00Z')) // after occ0 ended, before occ1 starts
+    const fakes = makeFakes([], auth, [], [daily()])
+    const app = createApp(fakes)
+    const res = await app.request('/v1/events/live', { headers })
+    const json = await res.json()
+    const e = json.events.find((x: { eventId: string }) => x.eventId === 'd1')
+    expect(e.state).toBe('scheduled')
+    expect(e.recurrence).toBe('daily')
+    expect(e.startsAt).toBe('2026-07-02T00:00:00.000Z') // the next occurrence window
+    expect(e.endsAt).toBe('2026-07-02T01:00:00.000Z')
+    expect(e.nextOccurrenceStartsAt).toBe('2026-07-03T00:00:00.000Z') // the one after that
+    expect(e.secondsUntilStart).toBeGreaterThan(0)
+  })
+
+  it('inside an occurrence: reports that occurrence live with its own bounds and the next occurrence start', async () => {
+    vi.setSystemTime(new Date('2026-07-02T00:30:00Z')) // inside occ1's live window
+    const fakes = makeFakes([], auth, [], [daily()])
+    const app = createApp(fakes)
+    const res = await app.request('/v1/events/live', { headers })
+    const json = await res.json()
+    const e = json.events.find((x: { eventId: string }) => x.eventId === 'd1')
+    expect(e.state).toBe('live')
+    expect(e.startsAt).toBe('2026-07-02T00:00:00.000Z')
+    expect(e.endsAt).toBe('2026-07-02T01:00:00.000Z')
+    expect(e.secondsUntilStart).toBeNull()
+    expect(e.nextOccurrenceStartsAt).toBe('2026-07-03T00:00:00.000Z')
   })
 })
 

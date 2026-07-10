@@ -74,18 +74,38 @@ export default {
         endingSoonMinutes: r.endingSoonMinutes,
         multiplier: r.multiplier,
         enabled: r.enabled,
+        recurrence: r.recurrence ?? 'none',
+        recurrenceEndsAt: r.recurrenceEndsAt ?? null,
       })),
     }
   },
   async timedEventsAll(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()
-    // ?endedWithinMinutes=<positive int>: excludes events with endsAt < now - N minutes.
-    // Absent or invalid (non-integer, zero, negative) -> unfiltered, for backward compatibility.
+    // ?endedWithinMinutes=<positive int>: excludes events with endsAt < now - N minutes —
+    // UNLESS the event is recurring and its recurrence hasn't ended yet (recurrenceEndsAt is
+    // null or still in the future). A months-old weekly event's occurrence-0 endsAt is ancient;
+    // without this OR-branch the scheduler would never see it again. Absent or invalid
+    // (non-integer, zero, negative) endedWithinMinutes -> unfiltered, for backward compatibility.
     const rawParam = String(ctx.query.endedWithinMinutes ?? '')
     const filters: Record<string, unknown> = {}
     if (/^[1-9][0-9]*$/.test(rawParam)) {
-      const cutoff = new Date(Date.now() - Number(rawParam) * 60_000)
-      filters.endsAt = { $gte: cutoff.toISOString() }
+      const now = Date.now()
+      const cutoff = new Date(now - Number(rawParam) * 60_000).toISOString()
+      // recurrenceEndsAt bounds occurrence STARTS, not ends: the final occurrence may end up to
+      // one interval after recurrenceEndsAt — at most 28 days, the monthly duration cap the
+      // timed-event lifecycle validation enforces (2_419_200_000 ms). Pad the recurring branch's
+      // cutoff by that max duration, or a bounded recurrence whose recurrenceEndsAt lands just
+      // after the final start scrolls out of the feed before its final ending_soon/ended are
+      // claimable. Over-fetching a finished event is harmless — its claims are conflict no-ops.
+      const MAX_OCCURRENCE_DURATION_MS = 2_419_200_000 // 28 days, the monthly duration cap
+      const recurringCutoff = new Date(now - Number(rawParam) * 60_000 - MAX_OCCURRENCE_DURATION_MS).toISOString()
+      filters.$or = [
+        { endsAt: { $gte: cutoff } },
+        {
+          recurrence: { $ne: 'none' },
+          $or: [{ recurrenceEndsAt: { $null: true } }, { recurrenceEndsAt: { $gte: recurringCutoff } }],
+        },
+      ]
     }
     const rows = await strapi.documents('api::timed-event.timed-event').findMany({
       filters,
@@ -103,6 +123,8 @@ export default {
           endingSoonMinutes: r.endingSoonMinutes,
           multiplier: r.multiplier,
           enabled: r.enabled,
+          recurrence: r.recurrence ?? 'none',
+          recurrenceEndsAt: r.recurrenceEndsAt ?? null,
           projectId: r.project.documentId,
         })),
     }

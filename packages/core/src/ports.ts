@@ -1,6 +1,19 @@
 import type { ClaimRejection } from './rewards.js'
 import type { AchievementDefinition, AuthContext, OfferDefinition, PointRules, RewardDefinition, Scope, TimedEventDefinition, TimedEventTransition, WebhookEndpointDefinition } from './types.js'
 
+export interface BackfillStore {
+  /**
+   * Try-lock semantics: takes a `pg_try_advisory_xact_lock` on the achievement rather than
+   * queueing on it, so a concurrent backfill of the SAME achievement returns
+   * `{ ok: false, reason: 'backfill_in_progress' }` immediately instead of waiting on the lock
+   * while holding a pool connection (which would starve every DB-backed endpoint).
+   */
+  backfillAchievement(scope: Scope, def: AchievementDefinition): Promise<
+    | { ok: true; usersEvaluated: number; progressRaised: number; unlocksGranted: number; pointsAwarded: number }
+    | { ok: false; reason: 'backfill_in_progress' }
+  >
+}
+
 export interface ConfigStore {
   getAchievements(projectId: string): Promise<AchievementDefinition[]>
   getOffers(projectId: string): Promise<OfferDefinition[]>
@@ -99,17 +112,17 @@ export interface StatsStore {
 }
 
 export interface WebhookDeliveryStore {
-  claimTransition(projectId: string, eventId: string, transition: TimedEventTransition): Promise<boolean>
+  claimTransition(projectId: string, eventId: string, occurrenceKey: string, transition: TimedEventTransition): Promise<boolean>
   recordDeadLetter(projectId: string, url: string, payload: string, error: string, at: Date): Promise<void>
   /** Sets delivered_at = now() on the claim row. Idempotent: already-delivered is a no-op update. */
-  markDelivered(projectId: string, eventId: string, transition: TimedEventTransition): Promise<void>
+  markDelivered(projectId: string, eventId: string, occurrenceKey: string, transition: TimedEventTransition): Promise<void>
   /** Rows where delivered_at IS NULL AND fired_at < olderThan AND attempts < maxAttempts. */
-  findStaleClaims(olderThan: Date, maxAttempts: number): Promise<Array<{ projectId: string; eventId: string; transition: TimedEventTransition; attempts: number }>>
-  incrementAttempts(projectId: string, eventId: string, transition: TimedEventTransition): Promise<void>
+  findStaleClaims(olderThan: Date, maxAttempts: number): Promise<Array<{ projectId: string; eventId: string; occurrenceKey: string; transition: TimedEventTransition; attempts: number }>>
+  incrementAttempts(projectId: string, eventId: string, occurrenceKey: string, transition: TimedEventTransition): Promise<void>
   /** Rows where delivered_at IS NULL AND attempts >= minAttempts — claims findStaleClaims
    * excludes forever once they've exhausted their redelivery attempts. Callers dead-letter
    * and mark these delivered so the loop stops rather than leaving them orphaned. */
-  findExhaustedClaims(minAttempts: number): Promise<Array<{ projectId: string; eventId: string; transition: TimedEventTransition; attempts: number }>>
+  findExhaustedClaims(minAttempts: number): Promise<Array<{ projectId: string; eventId: string; occurrenceKey: string; transition: TimedEventTransition; attempts: number }>>
   /** Deletes dead letters created before cutoff. Returns the number deleted. */
   deleteDeadLettersBefore(cutoff: Date): Promise<number>
 }

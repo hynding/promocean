@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  backfillResponseSchema,
   claimRewardRequestSchema,
   claimRewardResponseSchema,
   errorEnvelopeSchema,
@@ -64,6 +65,7 @@ export function buildOpenApiDocument(version: string) {
     validateCouponResponse: toSchema(validateCouponResponseSchema),
     redeemCouponRequest: toSchema(redeemCouponRequestSchema),
     redeemCouponResponse: toSchema(redeemCouponResponseSchema),
+    backfillResponse: toSchema(backfillResponseSchema),
     errorEnvelope: toSchema(errorEnvelopeSchema),
   }
 
@@ -175,6 +177,7 @@ export function buildOpenApiDocument(version: string) {
     '/v1/stats': {
       get: {
         summary: 'Aggregate project stats: totals, achievements, offers (with CTR), and timed events. Requires a secret key.',
+        description: 'For recurring timed events, participation is aggregated across every occurrence window intersecting the requested range, clamped to the most recent 400 occurrences per event.',
         parameters: [
           { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
           { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
@@ -313,6 +316,31 @@ export function buildOpenApiDocument(version: string) {
           },
           '409': {
             description: 'Redeem rejected: reward_unavailable (the reward has expired or no longer exists) or already_redeemed (the coupon was already used).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/achievements/{id}/backfill': {
+      post: {
+        summary: 'Retroactively recompute progress, unlocks, and points for an achievement against historical events. Requires a secret key.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Backfill summary.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/backfillResponse' } } },
+          },
+          '403': {
+            description: 'A publishable key was used; a secret key is required.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
+          },
+          '404': {
+            description: 'No achievement exists with this id.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
+          },
+          '409': {
+            description: 'backfill_in_progress: a backfill for this achievement is already running.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
           },
           default: errorResponse,
