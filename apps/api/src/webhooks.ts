@@ -182,6 +182,8 @@ export function startLifecycleScheduler(opts: {
   scanGraceMinutes?: number
   /** Dead letters older than this are purged by the retention sweep. Default 30. */
   deadLetterTtlDays?: number
+  /** Delivered claim rows older than this are purged by the retention sweep. Default 30. */
+  deliveredClaimsTtlDays?: number
   logger?: Logger
 }): () => void {
   const { configStore, deliveryStore, dispatcher, intervalMs = 30_000 } = opts
@@ -189,6 +191,7 @@ export function startLifecycleScheduler(opts: {
 
   const redeliveryGraceMinutes = opts.redeliveryGraceMinutes ?? 5
   const deadLetterTtlDays = opts.deadLetterTtlDays ?? 30
+  const deliveredClaimsTtlDays = opts.deliveredClaimsTtlDays ?? 30
   // Backstop clamp: index.ts computes the effective value once via resolveScanGraceMinutes
   // and passes it to both the config plane and here, so this is normally a no-op. Direct
   // callers (e.g. tests) that pass a raw value still get the same validation.
@@ -197,6 +200,11 @@ export function startLifecycleScheduler(opts: {
 
   const redeliveryGraceMs = redeliveryGraceMinutes * 60_000
 
+  // Per-tick cost (#23): every tick runs a full pass — two getAllTimedEvents() config-plane
+  // reads (phase 1 + phase 2), a findStaleClaims + findExhaustedClaims scan, and two retention
+  // DELETEs (phase 3). Cost scales with the number of enabled timed events and outstanding
+  // stale/exhausted claims, so intervalMs must stay comfortably above one tick's runtime to
+  // avoid overlapping ticks piling up on the pool.
   const tick = async () => {
     const now = new Date()
 
@@ -272,13 +280,23 @@ export function startLifecycleScheduler(opts: {
       logger.error({ err }, 'lifecycle scheduler: exhaustion sweep failed')
     }
 
-    // Phase 3: retention sweep — purge old dead letters.
+    // Phase 3: retention sweep — purge old dead letters and delivered claim rows. Delivered
+    // claims are safe to drop once past their TTL: their transition already fired and the row's
+    // only remaining job (redelivery dedup) is moot once delivered. Undelivered claims are never
+    // touched here — the redelivery/exhaustion sweeps above own them.
     try {
       const cutoff = new Date(now.getTime() - deadLetterTtlDays * 24 * 60 * 60 * 1000)
       const deleted = await deliveryStore.deleteDeadLettersBefore(cutoff)
       if (deleted > 0) logger.info({ deleted }, 'lifecycle scheduler: retention sweep purged dead letters')
     } catch (err) {
       logger.error({ err }, 'lifecycle scheduler: retention sweep failed')
+    }
+    try {
+      const cutoff = new Date(now.getTime() - deliveredClaimsTtlDays * 24 * 60 * 60 * 1000)
+      const deleted = await deliveryStore.deleteDeliveredClaimsBefore(cutoff)
+      if (deleted > 0) logger.info({ deleted }, 'lifecycle scheduler: retention sweep purged delivered claims')
+    } catch (err) {
+      logger.error({ err }, 'lifecycle scheduler: delivered-claims retention sweep failed')
     }
   }
 

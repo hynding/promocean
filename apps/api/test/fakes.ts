@@ -33,7 +33,6 @@ export function makeFakes(
   const progressStore: ProgressStore = {
     getCounts: async (s, u, ids) =>
       new Map(ids.flatMap((id) => (progress.has(sk(s, `${u}:${id}`)) ? [[id, progress.get(sk(s, `${u}:${id}`))!] as const] : []))),
-    setProgress: async (s, u, id, c) => { progress.set(sk(s, `${u}:${id}`), c) },
     recordUnlock: async (s, u, id, at) => {
       const k = sk(s, `${u}:${id}`)
       if (unlockDates.has(k)) return false

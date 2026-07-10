@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, date, index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { boolean, date, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 export const runtime = pgSchema('runtime')
 
@@ -130,5 +130,5 @@ export const userStreaks = runtime.table('user_streaks', {
   lastActiveDay: date('last_active_day'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
-  uniqueIndex('user_streaks_uq').on(t.projectId, t.environment, t.userId),
+  primaryKey({ columns: [t.projectId, t.environment, t.userId] }),
 ])

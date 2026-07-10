@@ -191,6 +191,43 @@ describe('PgWebhookDeliveryStore dead-letter retention', () => {
   })
 })
 
+describe('PgWebhookDeliveryStore delivered-claims retention', () => {
+  const insertClaim = (projectId: string, eventId: string, deliveredAt: Date | null, firedAt: Date) =>
+    db.$client.query(
+      `insert into runtime.timed_event_notifications (project_id, event_id, transition, fired_at, delivered_at, attempts) values ($1,$2,'live',$3,$4,0)`,
+      [projectId, eventId, firedAt, deliveredAt],
+    )
+
+  it('deletes only delivered rows older than cutoff; boundary is strict and undelivered rows are never swept', async () => {
+    const store = new PgWebhookDeliveryStore(db)
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30d ago
+    const justInside = new Date(cutoff.getTime() - 60_000) // delivered 1m before cutoff -> swept
+    const justOutside = new Date(cutoff.getTime() + 60_000) // delivered 1m after cutoff -> kept
+    const longAgo = new Date(cutoff.getTime() - 60 * 60 * 1000) // fired 1h before cutoff
+
+    await insertClaim('p-dc', 'delivered-old-1', justInside, longAgo)
+    await insertClaim('p-dc', 'delivered-old-2', justInside, longAgo)
+    await insertClaim('p-dc', 'delivered-recent', justOutside, longAgo)
+    // Undelivered but aged well past the cutoff: redelivery owns it, so it must never be swept.
+    await insertClaim('p-dc', 'undelivered-old', null, longAgo)
+
+    const deleted = await store.deleteDeliveredClaimsBefore(cutoff)
+    expect(deleted).toBe(2)
+
+    const { rows } = await db.$client.query(
+      `select event_id from runtime.timed_event_notifications where project_id='p-dc' order by event_id`,
+    )
+    expect(rows.map((r: any) => r.event_id)).toEqual(['delivered-recent', 'undelivered-old'])
+  })
+
+  it('returns 0 and deletes nothing when no delivered rows precede the cutoff', async () => {
+    const store = new PgWebhookDeliveryStore(db)
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    await insertClaim('p-dc2', 'undelivered-only', null, new Date(cutoff.getTime() - 60 * 60 * 1000))
+    expect(await store.deleteDeliveredClaimsBefore(cutoff)).toBe(0)
+  })
+})
+
 describe('migration 0005 — delivered_at backfill', () => {
   it('backfills delivered_at to fired_at for claims left null by pre-0004 data, and leaves delivered rows untouched', async () => {
     const store = new PgWebhookDeliveryStore(db)

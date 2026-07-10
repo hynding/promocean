@@ -29,22 +29,8 @@ export interface ApiKeyStore {
   verifyKey(rawKey: string): Promise<AuthContext | null>
 }
 
-export interface EventStore {
-  insertEvent(
-    scope: Scope,
-    event: {
-      userId: string
-      type: string
-      idempotencyKey: string
-      occurredAt: Date
-      meta?: Record<string, unknown>
-    }
-  ): Promise<{ deduped: boolean }>
-}
-
 export interface ProgressStore {
   getCounts(scope: Scope, userId: string, achievementIds: string[]): Promise<Map<string, number>>
-  setProgress(scope: Scope, userId: string, achievementId: string, current: number): Promise<void>
   recordUnlock(scope: Scope, userId: string, achievementId: string, unlockedAt: Date): Promise<boolean>
   getUserAchievements(
     scope: Scope,
@@ -125,6 +111,12 @@ export interface WebhookDeliveryStore {
   findExhaustedClaims(minAttempts: number): Promise<Array<{ projectId: string; eventId: string; occurrenceKey: string; transition: TimedEventTransition; attempts: number }>>
   /** Deletes dead letters created before cutoff. Returns the number deleted. */
   deleteDeadLettersBefore(cutoff: Date): Promise<number>
+  /**
+   * Deletes delivered claim rows where `delivered_at IS NOT NULL AND delivered_at < cutoff`.
+   * Undelivered rows (delivered_at IS NULL) are NEVER swept — the redelivery sweep owns them
+   * until they deliver or exhaust their attempts. Returns the number deleted.
+   */
+  deleteDeliveredClaimsBefore(cutoff: Date): Promise<number>
 }
 
 export interface ErasureStore {

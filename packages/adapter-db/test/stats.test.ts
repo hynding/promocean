@@ -188,3 +188,42 @@ describe('PgStatsStore multi-window (recurring occurrences)', () => {
     expect(stats.totals.timedEventParticipants).toBe(2)
   })
 })
+
+describe('PgStatsStore chunked cross-event totals', () => {
+  // Two SEPARATE events, each with one window, so at chunkSize 1 they land in different chunks.
+  const pc: Scope = { projectId: 'p-chunk', environment: 'test' }
+  const evA = { eventId: 'evA', startsAt: d1, endsAt: d2 }
+  const evB = { eventId: 'evB', startsAt: d3, endsAt: d4 }
+
+  beforeAll(async () => {
+    const insertEvent = (userId: string, idem: string, occurredAt: Date) =>
+      db.$client.query(
+        `insert into runtime.events (project_id, environment, user_id, type, idempotency_key, occurred_at) values ($1,$2,$3,$4,$5,$6)`,
+        [pc.projectId, pc.environment, userId, 'lesson_completed', idem, occurredAt],
+      )
+    // u-shared is active in BOTH events (one in each window → different chunks at chunkSize 1);
+    // u-onlyA and u-onlyB are each active in exactly one event.
+    await insertEvent('u-shared', 'c1', d1) // evA window
+    await insertEvent('u-shared', 'c2', d3) // evB window
+    await insertEvent('u-onlyA', 'c3', d2) // evA window
+    await insertEvent('u-onlyB', 'c4', d4) // evB window
+  })
+
+  it('produces identical results at chunkSize 1 and 50, counting a cross-chunk user once', async () => {
+    const chunked = new PgStatsStore(db, 1)
+    const unchunked = new PgStatsStore(db, 50)
+    const range = { from: null, to: null }
+    const resChunked = await chunked.getStats(pc, range, [evA, evB])
+    const resUnchunked = await unchunked.getStats(pc, range, [evA, evB])
+
+    // Bit-for-bit identical across chunk sizes.
+    expect(resChunked).toEqual(resUnchunked)
+    // Per-event counts are unaffected by chunking.
+    expect(sortByKey(resChunked.timedEvents, 'eventId')).toEqual([
+      { eventId: 'evA', participants: 2 }, // u-shared, u-onlyA
+      { eventId: 'evB', participants: 2 }, // u-shared, u-onlyB
+    ])
+    // Cross-event total unions the two chunks: u-shared counted once → 3 distinct.
+    expect(resChunked.totals.timedEventParticipants).toBe(3)
+  })
+})

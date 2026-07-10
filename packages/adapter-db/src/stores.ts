@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
-import { applyStreak, couponCodeFromBytes, decideClaim, type AchievementDefinition, type BackfillStore, type EngagementStore, type EngagementWrite, type ErasureStore, type EventStore, type IngestionStore, type OfferMetricsStore, type ProgressStore, type RewardDefinition, type RewardStore, type Scope, type StatsStore, type StreakState, type TimedEventTransition, type UsageStore, type WebhookDeliveryStore } from '@promocean/core'
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm'
+import { applyStreak, couponCodeFromBytes, decideClaim, type AchievementDefinition, type BackfillStore, type EngagementStore, type EngagementWrite, type ErasureStore, type IngestionStore, type OfferMetricsStore, type ProgressStore, type RewardDefinition, type RewardStore, type Scope, type StatsStore, type StreakState, type TimedEventTransition, type UsageStore, type WebhookDeliveryStore } from '@promocean/core'
 import { achievementProgress, coupons, events, monthlyActiveUsers, offerEvents, pointsLedger, timedEventNotifications, unlocks, usageCounters, userStreaks, webhookDeadLetters } from './schema.js'
 import type { Db } from './index.js'
 
@@ -28,17 +28,6 @@ function normalizeDay(value: string | Date | null): string | null {
   return value.slice(0, 10)
 }
 
-export class PgEventStore implements EventStore {
-  constructor(private db: Db) {}
-  async insertEvent(scope: Scope, e: { userId: string; type: string; idempotencyKey: string; occurredAt: Date; meta?: Record<string, unknown> }) {
-    const inserted = await this.db.insert(events)
-      .values({ ...scope, ...e })
-      .onConflictDoNothing()
-      .returning({ id: events.id })
-    return { deduped: inserted.length === 0 }
-  }
-}
-
 export class PgProgressStore implements ProgressStore {
   constructor(private db: Db) {}
   async getCounts(scope: Scope, userId: string, achievementIds: string[]) {
@@ -49,14 +38,6 @@ export class PgProgressStore implements ProgressStore {
       inArray(achievementProgress.achievementId, achievementIds),
     ))
     return new Map(rows.map((r) => [r.achievementId, r.current]))
-  }
-  async setProgress(scope: Scope, userId: string, achievementId: string, current: number) {
-    await this.db.insert(achievementProgress)
-      .values({ ...scope, userId, achievementId, current })
-      .onConflictDoUpdate({
-        target: [achievementProgress.projectId, achievementProgress.environment, achievementProgress.userId, achievementProgress.achievementId],
-        set: { current, updatedAt: sql`now()` },
-      })
   }
   async recordUnlock(scope: Scope, userId: string, achievementId: string, unlockedAt: Date) {
     const inserted = await this.db.insert(unlocks)
@@ -291,7 +272,15 @@ const groupWindowsByEvent = (windows: TimedEventWindow[]): Map<string, TimedEven
 }
 
 export class PgStatsStore implements StatsStore {
-  constructor(private db: Db) {}
+  /**
+   * `chunkSize` caps how many events a single cross-event participant query spans, keeping the
+   * OR-of-windows predicate (and its bind-parameter count) bounded when a project has many timed
+   * events. Chunking is by EVENT — one event's windows are never split across chunks — and the
+   * cross-event total merges each chunk's DISTINCT user_ids as JS Sets, so a user active in
+   * events from different chunks is still counted once. Default 50; tests force 1 to prove the
+   * chunk-count is irrelevant to the result.
+   */
+  constructor(private db: Db, private chunkSize = 50) {}
   async getStats(
     scope: Scope,
     range: { from: Date | null; to: Date | null },
@@ -323,13 +312,23 @@ export class PgStatsStore implements StatsStore {
       })),
       (async () => {
         if (timedEventWindows.length === 0) return 0
-        const windowConds = timedEventWindows.map((w) => sql`(occurred_at between GREATEST(${w.startsAt}::timestamptz, ${range.from}::timestamptz) and LEAST(${w.endsAt}::timestamptz, ${range.to}::timestamptz))`)
-        const result = await this.db.execute<{ n: number }>(sql`
-          select count(distinct user_id)::int as n
-          from runtime.events
-          where project_id = ${scope.projectId} and environment = ${scope.environment} and (${sql.join(windowConds, sql` or `)})
-        `)
-        return Number(result.rows[0]?.n ?? 0)
+        // Chunk the per-event window groups so each query spans at most `chunkSize` events,
+        // never splitting one event's windows. Each chunk returns its DISTINCT user_ids, which
+        // we merge into a single JS Set — a user active in events from two different chunks is
+        // therefore counted exactly once, matching the single-query behaviour bit for bit.
+        const eventGroups = [...groupWindowsByEvent(timedEventWindows)]
+        const userIds = new Set<string>()
+        for (let i = 0; i < eventGroups.length; i += this.chunkSize) {
+          const chunkWindows = eventGroups.slice(i, i + this.chunkSize).flatMap(([, windows]) => windows)
+          const windowConds = chunkWindows.map((w) => sql`(occurred_at between GREATEST(${w.startsAt}::timestamptz, ${range.from}::timestamptz) and LEAST(${w.endsAt}::timestamptz, ${range.to}::timestamptz))`)
+          const result = await this.db.execute<{ user_id: string }>(sql`
+            select distinct user_id
+            from runtime.events
+            where project_id = ${scope.projectId} and environment = ${scope.environment} and (${sql.join(windowConds, sql` or `)})
+          `)
+          for (const row of result.rows) userIds.add(row.user_id)
+        }
+        return userIds.size
       })(),
     ])
 
@@ -428,6 +427,18 @@ export class PgWebhookDeliveryStore implements WebhookDeliveryStore {
     const deleted = await this.db.delete(webhookDeadLetters)
       .where(lt(webhookDeadLetters.createdAt, cutoff))
       .returning({ id: webhookDeadLetters.id })
+    return deleted.length
+  }
+  async deleteDeliveredClaimsBefore(cutoff: Date) {
+    // Only rows that have actually delivered are eligible for the sweep. Undelivered rows
+    // (delivered_at IS NULL) are never matched by `delivered_at < cutoff` — the redelivery
+    // sweep owns them until they deliver or exhaust their attempts.
+    const deleted = await this.db.delete(timedEventNotifications)
+      .where(and(
+        isNotNull(timedEventNotifications.deliveredAt),
+        lt(timedEventNotifications.deliveredAt, cutoff),
+      ))
+      .returning({ eventId: timedEventNotifications.eventId })
     return deleted.length
   }
 }

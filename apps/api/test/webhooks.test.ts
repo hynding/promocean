@@ -34,6 +34,7 @@ function makeDeliveryStore() {
     incrementAttempts: async () => {},
     findExhaustedClaims: async () => [],
     deleteDeadLettersBefore: async () => 0,
+    deleteDeliveredClaimsBefore: async () => 0,
   }
   return { deliveryStore, deadLetters, claims, marked }
 }
@@ -608,6 +609,26 @@ describe('startLifecycleScheduler — group C3 (retention sweep)', () => {
     // tick fires 1000ms (intervalMs) after the system time set above
     expect(cutoff).toEqual(new Date('2026-06-15T00:00:01Z'))
     expect(info).toHaveBeenCalledWith(expect.objectContaining({ deleted: 3 }), expect.any(String))
+  })
+
+  it('deletes delivered claims older than deliveredClaimsTtlDays using the correct cutoff, and logs when count > 0', async () => {
+    vi.setSystemTime(new Date('2026-07-15T00:00:00Z'))
+    const configStore = makeConfigStore()
+    const { deliveryStore } = makeDeliveryStore()
+    const deleteDeliveredClaimsBefore = vi.fn().mockResolvedValue(4)
+    deliveryStore.deleteDeliveredClaimsBefore = deleteDeliveredClaimsBefore
+    const dispatcher = fakeDispatcher()
+    const info = vi.fn()
+    const testLogger = { warn: vi.fn(), error: vi.fn(), info } as unknown as Logger
+
+    const stop = startLifecycleScheduler({ configStore, deliveryStore, dispatcher, intervalMs: 1000, deliveredClaimsTtlDays: 30, logger: testLogger })
+    await vi.advanceTimersByTimeAsync(1000)
+    stop()
+
+    expect(deleteDeliveredClaimsBefore).toHaveBeenCalledTimes(1)
+    const [cutoff] = deleteDeliveredClaimsBefore.mock.calls[0] as [Date]
+    expect(cutoff).toEqual(new Date('2026-06-15T00:00:01Z'))
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ deleted: 4 }), expect.stringContaining('delivered claims'))
   })
 
   it('does not log when nothing was deleted', async () => {
