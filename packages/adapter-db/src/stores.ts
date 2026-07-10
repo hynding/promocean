@@ -610,8 +610,9 @@ export class PgRewardStore implements RewardStore {
       .from(coupons)
       .where(and(scoped(coupons, scope), eq(coupons.code, code)))
       // Prefer an unredeemed (claimed) row so a shared code reports 'claimed' while any
-      // claim remains available; then oldest-first for a stable pick.
-      .orderBy(sql`(${coupons.status} = 'claimed') DESC`, asc(coupons.claimedAt))
+      // claim remains available; then oldest-first, with id as the final tiebreak for a
+      // fully deterministic pick (matches the redeem subselect's claimed_at ASC, id ASC).
+      .orderBy(sql`(${coupons.status} = 'claimed') DESC`, asc(coupons.claimedAt), asc(coupons.id))
       .limit(1)
     if (!row) return { found: false as const }
     return { found: true as const, rewardId: row.rewardId, status: row.status as 'claimed' | 'redeemed' }

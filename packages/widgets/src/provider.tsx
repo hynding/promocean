@@ -10,6 +10,13 @@ export function PromoceanProvider({ client, children }: { client: Promocean; chi
   const [userId, setUserId] = useState<string | undefined>(() => client.currentUserId)
 
   useEffect(() => {
+    // Resync before subscribing: a client swapped in via props (or an
+    // identify() fired between this component's render and this effect
+    // running — child effects run first, so a descendant's own mount effect
+    // can identify() before we get here) would otherwise leave `userId`
+    // stuck on whatever it was initialized/last set to, rather than the
+    // client's actual current identity.
+    setUserId(client.currentUserId)
     // Subscribing (rather than reading client.currentUserId directly) means
     // widgets re-render on identify() instead of only reflecting whatever the
     // client's identity happened to be at initial mount.

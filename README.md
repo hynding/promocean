@@ -322,14 +322,15 @@ promocean.identify('user-456') // fires with 'user-456'
 
 `@promocean/widgets`' `<PromoceanProvider/>` subscribes to this and exposes
 the live identified user via `usePromoceanUser()`, so `<Leaderboard/>`'s
-current-user highlight and `<RewardsStore/>`'s fetch both track the
-identified user reactively. **Migration note:** if you previously remounted
-widgets via a `key={userId}` bump to make them pick up a re-identified user,
-that's no longer necessary — call `client.identify(newUserId)` on the same
-client and the affected widgets update in place. (A `key` bump is still the
-right tool for a different problem: forcing `<Leaderboard/>`/`<RewardsStore/>`
-to re-*fetch* their data, e.g. after a `track()` call for the *same* user —
-see `packages/widgets/README.md` and `apps/demo/app/promocean.tsx`'s
+current-user highlight and `<RewardsStore/>`'s and `<BadgeCabinet/>`'s
+fetches all track the identified user reactively. **Migration note:** if you
+previously remounted widgets via a `key={userId}` bump to make them pick up
+a re-identified user, that's no longer necessary — call
+`client.identify(newUserId)` on the same client and the affected widgets
+update in place. (A `key` bump is still the right tool for a different
+problem: forcing `<Leaderboard/>`/`<RewardsStore/>` to re-*fetch* their data,
+e.g. after a `track()` call for the *same* user — see
+`packages/widgets/README.md` and `apps/demo/app/promocean.tsx`'s
 `rewardsKey` for that unrelated, still-current pattern.)
 
 **Stats query accepts offset-ISO datetimes:** `GET /v1/stats`'s `?from=`/`?to=`

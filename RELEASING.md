@@ -7,7 +7,7 @@ The publishable packages are the three MIT-licensed ones (see `LICENSING.md`):
 | `@promocean/contracts` | yes (npm) |
 | `@promocean/sdk` | yes (npm) |
 | `@promocean/widgets` | yes (npm) |
-| `@promocean/core`, `@promocean/adapter-db`, `@promocean/adapter-strapi`, `@promocean/config`, `api`, `cms`, `demo` | no — GPL/private, listed in `.changeset/config.json` `ignore` |
+| `@promocean/core`, `@promocean/adapter-db`, `@promocean/adapter-strapi`, `@promocean/config`, `api`, `cms`, `demo` | no — `"private": true` in their `package.json` |
 
 Versioning is driven by [Changesets](https://github.com/changesets/changesets).
 
@@ -67,12 +67,24 @@ for f in /tmp/promocean-pack/*.tgz; do tar -xOzf "$f" package/package.json; done
       (e.g. `"@promocean/contracts": "0.1.0"`)
 - [ ] `main`/`types` point into `dist/`
 
-Note: the dry-run also prints the **non-publishable** workspace packages
-(config/core/adapters) because `pnpm publish -r` walks every non-private
-workspace package. That's expected for the dry-run; the real publish goes
-through `changeset publish`, which only publishes the packages changesets
-versioned (the ignored ones are never versioned, and CI's registry auth is
-scoped to the real release flow). Their tarball listings can be ignored here.
+Note: `@promocean/core`, `@promocean/adapter-db`, `@promocean/adapter-strapi`,
+`@promocean/config`, and `api` are all `"private": true`, so `pnpm publish -r`
+(including this dry-run) skips them entirely — you should **not** see their
+tarball listings in this step at all. That's a load-bearing property, not
+cosmetic: `changeset publish` decides what to publish by walking every
+**non-private** workspace package and publishing whichever ones have a local
+version not yet on the registry. It does **not** consult
+`.changeset/config.json`'s `ignore` list at publish time — that list only
+keeps `changeset version` from bumping those packages' versions/changelogs.
+Before these five were marked `private`, nothing at publish time stood
+between them and npm; the very first real `changeset publish` run would have
+tried to publish all five GPL/internal packages (`api` included) to the
+`@promocean` scope. `private: true` is the actual guard here — the `ignore`
+list alone never was.
+
+**Never run `pnpm publish -r` without `--dry-run`.** The real publish path is
+`changeset publish`, invoked only via the manually-dispatched `release.yml`
+workflow (§3) — never run a bare recursive `pnpm publish` yourself.
 
 ### 2.2 Publish to a local verdaccio
 

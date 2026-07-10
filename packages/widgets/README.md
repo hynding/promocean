@@ -93,11 +93,11 @@ function CurrentUser() {
 `usePromoceanUser()` throws if used outside a `<PromoceanProvider/>`, same as
 `usePromocean()`. Migration note: if you previously remounted widgets via a
 `key={userId}` bump to force them to reflect a re-identified user, that's no
-longer necessary — `<Leaderboard/>`'s highlight and `<RewardsStore/>`'s data
-both already track the identified user reactively (see below); a `key` bump
-is still the right tool if you specifically want to force a full
-fetch-on-mount refresh (e.g. after `track()`, since neither widget
-auto-refreshes its *fetched data* on every event).
+longer necessary — `<Leaderboard/>`'s highlight and `<RewardsStore/>`'s and
+`<BadgeCabinet/>`'s data all already track the identified user reactively
+(see below); a `key` bump is still the right tool if you specifically want
+to force a full fetch-on-mount refresh (e.g. after `track()`, since none of
+these widgets auto-refreshes its *fetched data* on every event).
 
 ### `<UnlockToast durationMs?={5000} />`
 
@@ -108,8 +108,13 @@ achievement unlock. Mount once per page.
 ### `<BadgeCabinet />`
 
 Renders the full achievement grid (locked and unlocked) for the identified
-user, with `current`/`target` progress. Fetches on mount and re-fetches
-automatically whenever an unlock happens.
+user, with `current`/`target` progress. Fetches `client.getAchievements()` on
+mount, re-fetches automatically whenever an unlock happens, and — reactively,
+via `usePromoceanUser()` — **again whenever the identified user changes**:
+identifying after mount populates it for the first time, and re-identifying
+to a different user refetches so it shows that user's own badges instead of
+the previous user's. Renders nothing (and never fetches) until a user is
+identified.
 
 ### `<Placement slug="homepage-banner" />`
 

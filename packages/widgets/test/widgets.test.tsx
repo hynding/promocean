@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, useEffect } from 'react'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Reward, UnlockPayload } from '@promocean/contracts'
@@ -52,9 +52,18 @@ function fakeClient(achievements: unknown[] = [], offer: unknown = null) {
   }
 }
 
-function UserIdProbe({ onRender }: { onRender: () => void }) {
-  usePromoceanUser()
-  onRender()
+function UserIdProbe({ onRender }: { onRender: (userId: string | undefined) => void }) {
+  const userId = usePromoceanUser()
+  onRender(userId)
+  return null
+}
+
+// Fires `identify()` from a descendant's OWN mount effect. React runs child effects
+// before parent effects on mount, so this reliably fires before <PromoceanProvider/>'s
+// own effect — reproducing the "identify() fired between render and the provider's
+// effect" race without relying on timing.
+function IdentifyOnMount({ identify, userId }: { identify: (userId: string) => void; userId: string }) {
+  useEffect(() => { identify(userId) }, [identify, userId])
   return null
 }
 
@@ -78,6 +87,41 @@ describe('PromoceanProvider', () => {
     // wasn't vacuously true.
     act(() => emitUserChange('u2'))
     expect(onRender.mock.calls.length).toBe(countAfterMount + 1)
+  })
+
+  it('resyncs userId from the client when a descendant identifies in its own mount effect, before the provider effect runs', async () => {
+    const { client, identify } = fakeClient()
+    identify('u1')
+    const onRender = vi.fn()
+    render(
+      <PromoceanProvider client={client}>
+        <IdentifyOnMount identify={identify} userId="u2" />
+        <UserIdProbe onRender={onRender} />
+      </PromoceanProvider>,
+    )
+    // The probe's first render (during the render phase, before any effects run)
+    // still observes the pre-mount identity, since IdentifyOnMount hasn't fired yet.
+    expect(onRender).toHaveBeenNthCalledWith(1, 'u1')
+    // Once effects settle (child's identify() then the provider's own resync-and-
+    // subscribe effect), the context ends at 'u2' — not stuck on 'u1' from a dropped
+    // notify that fired before the provider had subscribed.
+    await waitFor(() => expect(onRender).toHaveBeenLastCalledWith('u2'))
+  })
+
+  it('resyncs userId when the client instance itself is swapped via props', async () => {
+    const { client: clientA } = fakeClient()
+    clientA.currentUserId = 'u1'
+    const { client: clientB } = fakeClient()
+    clientB.currentUserId = 'u2'
+    const onRender = vi.fn()
+    const { rerender } = render(
+      <PromoceanProvider client={clientA}><UserIdProbe onRender={onRender} /></PromoceanProvider>,
+    )
+    await waitFor(() => expect(onRender).toHaveBeenLastCalledWith('u1'))
+    rerender(<PromoceanProvider client={clientB}><UserIdProbe onRender={onRender} /></PromoceanProvider>)
+    // Without a resync, the provider would keep clientA's 'u1' in state (only
+    // `client` changed, not clientA's identity) until clientB happened to notify.
+    await waitFor(() => expect(onRender).toHaveBeenLastCalledWith('u2'))
   })
 })
 
@@ -130,6 +174,7 @@ describe('BadgeCabinet', () => {
       { achievementId: 'a1', name: 'First Lesson', description: null, artworkUrl: null, current: 1, target: 1, unlockedAt: '2026-07-06T00:00:00.000Z' },
       { achievementId: 'a2', name: 'Getting Started', description: null, artworkUrl: null, current: 3, target: 10, unlockedAt: null },
     ])
+    client.currentUserId = 'u1'
     render(<PromoceanProvider client={client}><BadgeCabinet /></PromoceanProvider>)
     await waitFor(() => expect(screen.getByText('First Lesson')).toBeDefined())
     expect(screen.getByText('3/10')).toBeDefined()
@@ -138,6 +183,7 @@ describe('BadgeCabinet', () => {
   })
   it('refetches when an unlock fires', async () => {
     const { client, emit } = fakeClient([])
+    client.currentUserId = 'u1'
     render(<PromoceanProvider client={client}><BadgeCabinet /></PromoceanProvider>)
     await waitFor(() => expect(client.getAchievements).toHaveBeenCalledTimes(1))
     act(() => emit({ achievementId: 'a1', name: 'First Lesson', unlockedAt: '2026-07-06T00:00:00.000Z' }))
@@ -147,6 +193,7 @@ describe('BadgeCabinet', () => {
     const { client, emit } = fakeClient([
       { achievementId: 'a1', name: 'First Lesson', description: null, artworkUrl: null, current: 1, target: 1, unlockedAt: '2026-07-06T00:00:00.000Z' },
     ])
+    client.currentUserId = 'u1'
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       render(<PromoceanProvider client={client}><BadgeCabinet /></PromoceanProvider>)
@@ -160,6 +207,49 @@ describe('BadgeCabinet', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+  it('renders nothing and never fetches (no warn) when unidentified', async () => {
+    const { client } = fakeClient([
+      { achievementId: 'a1', name: 'First Lesson', description: null, artworkUrl: null, current: 1, target: 1, unlockedAt: '2026-07-06T00:00:00.000Z' },
+    ])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const { container } = render(<PromoceanProvider client={client}><BadgeCabinet /></PromoceanProvider>)
+      // Flush microtasks so a wrongly-fired fetch would have had a chance to reject/resolve.
+      await act(async () => { await Promise.resolve() })
+      expect(client.getAchievements).not.toHaveBeenCalled()
+      expect(container.querySelectorAll('li')).toHaveLength(0)
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+  it('populates once identify() fires after mount (reactive provider, not a static prop)', async () => {
+    const { client, identify } = fakeClient([
+      { achievementId: 'a1', name: 'First Lesson', description: null, artworkUrl: null, current: 1, target: 1, unlockedAt: '2026-07-06T00:00:00.000Z' },
+    ])
+    render(<PromoceanProvider client={client}><BadgeCabinet /></PromoceanProvider>)
+    expect(client.getAchievements).not.toHaveBeenCalled()
+    act(() => identify('u1'))
+    await waitFor(() => expect(screen.getByText('First Lesson')).toBeDefined())
+    expect(client.getAchievements).toHaveBeenCalledTimes(1)
+  })
+  it('re-identifying to a different user refetches with the new context', async () => {
+    const { client, identify } = fakeClient([
+      { achievementId: 'a1', name: 'First Lesson', description: null, artworkUrl: null, current: 1, target: 1, unlockedAt: '2026-07-06T00:00:00.000Z' },
+    ])
+    client.currentUserId = 'u1'
+    render(<PromoceanProvider client={client}><BadgeCabinet /></PromoceanProvider>)
+    await waitFor(() => expect(client.getAchievements).toHaveBeenCalledTimes(1))
+    client.getAchievements.mockResolvedValueOnce([
+      { achievementId: 'a2', name: 'Getting Started', description: null, artworkUrl: null, current: 3, target: 10, unlockedAt: null },
+    ])
+    act(() => identify('u2'))
+    await waitFor(() => expect(client.getAchievements).toHaveBeenCalledTimes(2))
+    // The previous user's badge is gone — the demo's switch-user flow must never keep
+    // showing the previous user's badges after a re-identify.
+    await waitFor(() => expect(screen.getByText('Getting Started')).toBeDefined())
+    expect(screen.queryByText('First Lesson')).toBeNull()
   })
 })
 

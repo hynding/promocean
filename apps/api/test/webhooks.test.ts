@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Logger } from 'pino'
 import { WEBHOOK_SIGNATURE_HEADER, type WebhookMessage } from '@promocean/contracts'
 import type { ConfigStore, TimedEventDefinition, WebhookDeliveryStore, WebhookEndpointDefinition } from '@promocean/core'
-import { WebhookDispatcher, resolveScanGraceMinutes, startLifecycleScheduler } from '../src/webhooks.js'
+import { WebhookDispatcher, resolveDeliveredClaimsTtlDays, resolveScanGraceMinutes, startLifecycleScheduler } from '../src/webhooks.js'
 import { createApp } from '../src/app.js'
 import { makeFakes } from './fakes.js'
 
@@ -735,6 +735,74 @@ describe('resolveScanGraceMinutes — group C5 (single-sourced scan-grace clamp)
       stop()
 
       expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('resolveDeliveredClaimsTtlDays — group C6 (delivered-claims TTL floor)', () => {
+  it('clamps a misconfigured 0 up to 1 day and warns', () => {
+    const warn = vi.fn()
+    const testLogger = { warn, error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+    const result = resolveDeliveredClaimsTtlDays(0, testLogger)
+
+    expect(result).toBe(1)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      { deliveredClaimsTtlDays: 0, clampedDeliveredClaimsTtlDays: 1 },
+      expect.any(String),
+    )
+  })
+
+  it('clamps a negative value up to 1 day and warns', () => {
+    const warn = vi.fn()
+    const testLogger = { warn, error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+    const result = resolveDeliveredClaimsTtlDays(-5, testLogger)
+
+    expect(result).toBe(1)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes a valid value through unchanged with no warning', () => {
+    const warn = vi.fn()
+    const testLogger = { warn, error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+    const result = resolveDeliveredClaimsTtlDays(30, testLogger)
+
+    expect(result).toBe(30)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('startLifecycleScheduler applies the clamp: a misconfigured 0 still purges using a 1-day cutoff, not a same-instant one', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-15T00:00:00Z'))
+      const configStore = makeConfigStore()
+      const { deliveryStore } = makeDeliveryStore()
+      const deleteDeliveredClaimsBefore = vi.fn().mockResolvedValue(0)
+      deliveryStore.deleteDeliveredClaimsBefore = deleteDeliveredClaimsBefore
+      const dispatcher = fakeDispatcher()
+      const warn = vi.fn()
+      const testLogger = { warn, error: vi.fn(), info: vi.fn() } as unknown as Logger
+
+      const stop = startLifecycleScheduler({
+        configStore, deliveryStore, dispatcher, intervalMs: 1000, logger: testLogger, deliveredClaimsTtlDays: 0,
+      })
+      await vi.advanceTimersByTimeAsync(1000)
+      stop()
+
+      expect(deleteDeliveredClaimsBefore).toHaveBeenCalledTimes(1)
+      const [cutoff] = deleteDeliveredClaimsBefore.mock.calls[0] as [Date]
+      // Clamped to 1 day (not 0), so the cutoff is a full day before the tick, never
+      // "seconds ago" — a claim delivered moments earlier survives the sweep.
+      expect(cutoff).toEqual(new Date('2026-07-14T00:00:01Z'))
+      expect(warn).toHaveBeenCalledWith(
+        { deliveredClaimsTtlDays: 0, clampedDeliveredClaimsTtlDays: 1 },
+        expect.any(String),
+      )
     } finally {
       vi.useRealTimers()
     }

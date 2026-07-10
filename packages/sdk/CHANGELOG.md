@@ -17,7 +17,7 @@
     same posture as `getStats()`/`validateCoupon()`/`redeemCoupon()`):
     retroactively recomputes an achievement's progress/unlocks/points against
     all historical events of its `eventType`, returning `{ usersEvaluated,
-progressRaised, unlocksGranted, pointsAwarded }`. A retroactive unlock
+    progressRaised, unlocksGranted, pointsAwarded }`. A retroactive unlock
     pays out its `pointsValue` bonus exactly like a live one — see the root
     README for the full operator flow. The error catalog gains a
     `backfill_in_progress` code (surfaced as `409` when a backfill of the same

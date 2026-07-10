@@ -156,6 +156,26 @@ function buildTransitionMessage(
  * to both. `startLifecycleScheduler` also calls this internally as a backstop for callers
  * that pass a raw value directly; when fed an already-resolved value it is a no-op.
  */
+/**
+ * Clamps deliveredClaimsTtlDays to a minimum of 1 day. A misconfigured value of 0 (or
+ * negative) would let the retention sweep (phase 3) delete a delivered claim's row mere
+ * seconds after markDelivered while its occurrence is still inside the scan window —
+ * phase 1 would then see no claim row for that occurrence/transition, re-claim it, and
+ * re-deliver a webhook that already fired. Warns and clamps to 1 when violated.
+ */
+export function resolveDeliveredClaimsTtlDays(deliveredClaimsTtlDays: number, logger?: Logger): number {
+  if (deliveredClaimsTtlDays < 1) {
+    const clampedDeliveredClaimsTtlDays = 1
+    const log = logger ?? rootLogger.child({ component: 'webhooks' })
+    log.warn(
+      { deliveredClaimsTtlDays, clampedDeliveredClaimsTtlDays },
+      'lifecycle scheduler: deliveredClaimsTtlDays must be at least 1 day; clamping',
+    )
+    return clampedDeliveredClaimsTtlDays
+  }
+  return deliveredClaimsTtlDays
+}
+
 export function resolveScanGraceMinutes(scanGraceMinutes: number, redeliveryGraceMinutes: number, logger?: Logger): number {
   if (scanGraceMinutes <= redeliveryGraceMinutes) {
     const clampedScanGraceMinutes = redeliveryGraceMinutes + 5
@@ -191,7 +211,7 @@ export function startLifecycleScheduler(opts: {
 
   const redeliveryGraceMinutes = opts.redeliveryGraceMinutes ?? 5
   const deadLetterTtlDays = opts.deadLetterTtlDays ?? 30
-  const deliveredClaimsTtlDays = opts.deliveredClaimsTtlDays ?? 30
+  const deliveredClaimsTtlDays = resolveDeliveredClaimsTtlDays(opts.deliveredClaimsTtlDays ?? 30, logger)
   // Backstop clamp: index.ts computes the effective value once via resolveScanGraceMinutes
   // and passes it to both the config plane and here, so this is normally a no-op. Direct
   // callers (e.g. tests) that pass a raw value still get the same validation.
