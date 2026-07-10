@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Reward, UnlockPayload } from '@promocean/contracts'
 import { PromoceanApiError } from '@promocean/sdk'
-import { BadgeCabinet, EventCountdown, Leaderboard, Placement, PromoceanProvider, RewardsStore, UnlockToast } from '../src/index.js'
+import { BadgeCabinet, EventCountdown, Leaderboard, Placement, PromoceanProvider, RewardsStore, UnlockToast, usePromoceanUser } from '../src/index.js'
 
 // RTL's automatic afterEach cleanup only registers when `afterEach` exists as a
 // global; this project's vitest config doesn't set `test.globals: true`, so
@@ -41,9 +41,45 @@ function fakeClient(achievements: unknown[] = [], offer: unknown = null) {
       client.currentUserId = userId
       userChangeListeners.forEach((cb) => cb(userId))
     },
+    // Invokes registered onUserChange listeners DIRECTLY, bypassing identify()'s
+    // own same-id guard. Lets tests drive the provider's listener callback
+    // (setUserId) with an identical id, so a same-id "no-op" test actually
+    // exercises the provider's own state bail-out rather than the fake's guard.
+    emitUserChange: (userId: string | undefined) => {
+      userChangeListeners.forEach((cb) => cb(userId))
+    },
     userChangeListenerCount: () => userChangeListeners.size,
   }
 }
+
+function UserIdProbe({ onRender }: { onRender: () => void }) {
+  usePromoceanUser()
+  onRender()
+  return null
+}
+
+describe('PromoceanProvider', () => {
+  it('a same-id user-change notify is a no-op (no consumer re-render); a different-id notify propagates', async () => {
+    const { client, emitUserChange } = fakeClient()
+    client.currentUserId = 'u1'
+    const onRender = vi.fn()
+    render(<PromoceanProvider client={client}><UserIdProbe onRender={onRender} /></PromoceanProvider>)
+    const countAfterMount = onRender.mock.calls.length
+
+    // Bypasses the fake's own identify() same-id guard entirely — this proves
+    // the provider itself (via useState's identical-primitive bail-out) does
+    // not re-render consumers on a same-id notify, not merely that the mock
+    // never called the listener.
+    act(() => emitUserChange('u1'))
+    expect(onRender.mock.calls.length).toBe(countAfterMount)
+
+    // Discriminating control: a genuinely different id DOES propagate, proving
+    // the probe is capable of detecting a re-render and the prior assertion
+    // wasn't vacuously true.
+    act(() => emitUserChange('u2'))
+    expect(onRender.mock.calls.length).toBe(countAfterMount + 1)
+  })
+})
 
 describe('UnlockToast', () => {
   it('renders an unlock in a polite live region and auto-dismisses', async () => {

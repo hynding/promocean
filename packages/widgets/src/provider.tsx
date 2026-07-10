@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Promocean } from '@promocean/sdk'
 
 const Ctx = createContext<{ client: Promocean; userId: string | undefined } | null>(null)
@@ -17,7 +17,11 @@ export function PromoceanProvider({ client, children }: { client: Promocean; chi
     return unsubscribe
   }, [client])
 
-  return <Ctx.Provider value={{ client, userId }}>{children}</Ctx.Provider>
+  // Stable across unrelated parent re-renders (as long as client/userId are
+  // unchanged) so consumers don't force-propagate on every parent render.
+  const value = useMemo(() => ({ client, userId }), [client, userId])
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
 export function usePromocean(): Promocean {
