@@ -24,15 +24,32 @@ RUN pnpm install --frozen-lockfile
 # Then bring in pruned source and build api (+ its workspace deps via ^build).
 COPY --from=pruner /app/out/full/ .
 RUN pnpm turbo run build --filter=api
-# Strip dev dependencies in place, leaving prod node_modules + the built
-# workspace package dist/ outputs (workspace links are preserved).
-RUN pnpm prune --prod
 
-# --- Stage 3: minimal non-root runtime ---
+# --- Stage 3: production-only dependency tree ---
+# `pnpm prune --prod` proved to be a no-op for the workspace virtual store
+# (dev deps like typescript/vitest/tsx survived in node_modules/.pnpm), so
+# instead install prod deps from scratch off the same pruned lockfile: this
+# yields the exact pnpm symlink topology with ONLY production packages.
+FROM base AS prod-deps
+COPY --from=pruner /app/out/json/ .
+RUN pnpm install --prod --frozen-lockfile
+
+# --- Stage 4: minimal non-root runtime ---
 FROM base AS runner
 ENV NODE_ENV=production
 # node:alpine ships an unprivileged `node` user (uid 1000); run as it.
-COPY --from=installer --chown=node:node /app .
+# Workspace skeleton (package.json files) + prod-only node_modules; the
+# relative pnpm/workspace symlinks stay valid because the whole tree moves.
+COPY --from=prod-deps --chown=node:node /app .
+# Built output only — no src/, test/, or tsconfig in the runtime image.
+COPY --from=installer --chown=node:node /app/apps/api/dist ./apps/api/dist
+COPY --from=installer --chown=node:node /app/packages/core/dist ./packages/core/dist
+COPY --from=installer --chown=node:node /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=installer --chown=node:node /app/packages/adapter-strapi/dist ./packages/adapter-strapi/dist
+COPY --from=installer --chown=node:node /app/packages/adapter-db/dist ./packages/adapter-db/dist
+# runMigrations() resolves `../migrations` relative to adapter-db/dist/migrate.js,
+# i.e. the migrations dir must sit at the package root next to dist/.
+COPY --from=installer --chown=node:node /app/packages/adapter-db/migrations ./packages/adapter-db/migrations
 USER node
 EXPOSE 3001
 # Healthcheck via node's built-in http (no curl/wget assumption); hits /readyz.

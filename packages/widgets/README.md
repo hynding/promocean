@@ -73,6 +73,32 @@ Makes the `Promocean` SDK instance available to all descendant widgets via
 React context. `usePromocean()` is also exported if you want to build custom
 widgets against the same client.
 
+**Reactive to `identify()`:** the provider subscribes to the client's
+`onUserChange` (from `@promocean/sdk`) and re-renders descendants whenever
+the identified user actually changes. Call `client.identify(newUserId)` on
+the *same* client instance to switch users in place — you do **not** need to
+recreate the `Promocean` client or remount `<PromoceanProvider/>` (e.g. via a
+React `key`) for widgets to pick up the new identity. This is exposed to your
+own components via:
+
+```tsx
+import { usePromoceanUser } from '@promocean/widgets'
+
+function CurrentUser() {
+  const userId = usePromoceanUser() // string | undefined; re-renders on identify()
+  return <span>{userId ?? 'anonymous'}</span>
+}
+```
+
+`usePromoceanUser()` throws if used outside a `<PromoceanProvider/>`, same as
+`usePromocean()`. Migration note: if you previously remounted widgets via a
+`key={userId}` bump to force them to reflect a re-identified user, that's no
+longer necessary — `<Leaderboard/>`'s highlight and `<RewardsStore/>`'s and
+`<BadgeCabinet/>`'s data all already track the identified user reactively
+(see below); a `key` bump is still the right tool if you specifically want
+to force a full fetch-on-mount refresh (e.g. after `track()`, since none of
+these widgets auto-refreshes its *fetched data* on every event).
+
 ### `<UnlockToast durationMs?={5000} />`
 
 Subscribes to `client.onUnlock()` and renders transient toasts
@@ -82,8 +108,13 @@ achievement unlock. Mount once per page.
 ### `<BadgeCabinet />`
 
 Renders the full achievement grid (locked and unlocked) for the identified
-user, with `current`/`target` progress. Fetches on mount and re-fetches
-automatically whenever an unlock happens.
+user, with `current`/`target` progress. Fetches `client.getAchievements()` on
+mount, re-fetches automatically whenever an unlock happens, and — reactively,
+via `usePromoceanUser()` — **again whenever the identified user changes**:
+identifying after mount populates it for the first time, and re-identifying
+to a different user refetches so it shows that user's own badges instead of
+the previous user's. Renders nothing (and never fetches) until a user is
+identified.
 
 ### `<Placement slug="homepage-banner" />`
 
@@ -119,12 +150,18 @@ Renders a ranked table (rank, user, points) via `client.getLeaderboard()`.
 `window` is `'all' | '7d' | '30d'` (server default `'all'`), `limit`
 defaults to the server default (`10`, max `100`) when omitted, and `title`
 renders an optional heading above the table. The identified user's own row
-(matched by `client.currentUserId`) is bolded and highlighted
-(`[data-promocean-current-user="true"]`). Renders nothing while empty or
-before the initial fetch resolves. Fetches once on mount — it does not
-auto-refresh after a `track()` call the way `<BadgeCabinet/>` does on
-unlock, so re-mount it (or otherwise force a re-fetch) if you need it to
-reflect points awarded during the current page session.
+(matched reactively against `usePromoceanUser()`, not a one-time read of
+`client.currentUserId`) is bolded and highlighted
+(`[data-promocean-current-user="true"]`) — re-identifying the client moves
+the highlight immediately, even without a re-fetch, since it's evaluated
+against whichever row (if any) matches the *current* identified user on
+every render. Renders nothing while empty or before the initial fetch
+resolves. The **entries themselves** still fetch once on mount only — it
+does not auto-refresh after a `track()` call the way `<BadgeCabinet/>` does
+on unlock, nor after `identify()` re-identifies the client, so re-mount it
+(or otherwise force a re-fetch) if you need the *entries* to reflect points
+awarded during the current page session or a newly-identified user who
+isn't yet in the already-fetched ranking.
 
 **Privacy:** the leaderboard shows every ranked user's raw `userId` — see
 the SDK README's privacy note before rendering this with identifying user
@@ -134,11 +171,15 @@ ids.
 
 Renders the identified user's claimable reward catalog: name, description,
 price (`Free` or `N pts`), remaining inventory when the reward is capped,
-and a claim button. Fetches `client.listRewards()` + `client.getWallet()`
-once on mount (same fetch-once contract as `<Leaderboard/>` — remount it,
-e.g. via a `key` you bump after a `track()` call, if you need the shown
-balance/claim-eligibility to reflect points earned during the current
-session). Renders nothing until a user is identified.
+and a claim button. Fetches `client.listRewards()` + `client.getWallet()` on
+mount and **again whenever the identified user changes** (reactively, via
+`usePromoceanUser()` — re-identifying the client refetches this widget's
+catalog/balance for the new user with no remount needed). It does *not*
+auto-refresh after a `track()` call for the *same* user, though (points
+earned mid-session aren't reflected until something else triggers a
+re-fetch) — remount it, e.g. via a `key` you bump after `track()`, if you
+need the shown balance/claim-eligibility to reflect points earned during
+the current session. Renders nothing until a user is identified.
 
 Claiming a reward calls `client.claimReward(slug)`; on success the coupon
 code is shown inline (with a **Copy** button, `navigator.clipboard`) and

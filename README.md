@@ -177,7 +177,11 @@ that the resulting event/unlock counts show up live on `/stats`;
 beacon, dismisses, and — after a reload — neither re-renders nor fires
 another impression beacon; `timed-event-loop.spec.ts` proves the live-event
 countdown and progress multiplier; `engagement-loop.spec.ts` proves the
-wallet/streak readouts and leaderboard row; `rewards-loop.spec.ts` proves
+wallet/streak readouts and leaderboard row, plus (see "Reactive identify"
+above) that using the demo's "Switch user" control to re-identify the
+existing client to a fresh id reactively resets the wallet/streak readouts
+and moves the leaderboard's current-user highlight off the previous id —
+with no page reload or widget remount; `rewards-loop.spec.ts` proves
 the full earn/burn loop — claiming a free static-code reward, being blocked
 on a priced reward by insufficient points, earning enough to claim it
 (generated code, balance debited), the `/stats` page's coupon
@@ -298,6 +302,42 @@ non-numeric, or otherwise invalid, the event's local day is computed as if
 the offset were `0` — i.e. it falls back to the UTC calendar day rather than
 failing the request. (A numeric offset outside the real-world range of
 ±840 minutes / UTC-14..UTC+14 is clamped to the nearest bound instead.)
+
+### Reactive identify
+
+The SDK's `identify(userId)` (client-side, browser use) supports switching
+users on an **existing** client instance — you don't have to construct a new
+`Promocean` to re-identify. Calling it with a different id than the client's
+current one fires every `onUserChange(cb)` listener with the new id;
+calling it again with the *same* id it's already identified as is a no-op
+and never notifies (so subscribing something expensive to `onUserChange`
+never fires spuriously on a redundant `identify()` call):
+
+```ts
+const unsubscribe = promocean.onUserChange((userId) => { /* ... */ })
+promocean.identify('user-123')
+promocean.identify('user-123') // no-op, no notification
+promocean.identify('user-456') // fires with 'user-456'
+```
+
+`@promocean/widgets`' `<PromoceanProvider/>` subscribes to this and exposes
+the live identified user via `usePromoceanUser()`, so `<Leaderboard/>`'s
+current-user highlight and `<RewardsStore/>`'s and `<BadgeCabinet/>`'s
+fetches all track the identified user reactively. **Migration note:** if you
+previously remounted widgets via a `key={userId}` bump to make them pick up
+a re-identified user, that's no longer necessary — call
+`client.identify(newUserId)` on the same client and the affected widgets
+update in place. (A `key` bump is still the right tool for a different
+problem: forcing `<Leaderboard/>`/`<RewardsStore/>` to re-*fetch* their data,
+e.g. after a `track()` call for the *same* user — see
+`packages/widgets/README.md` and `apps/demo/app/promocean.tsx`'s
+`rewardsKey` for that unrelated, still-current pattern.)
+
+**Stats query accepts offset-ISO datetimes:** `GET /v1/stats`'s `?from=`/`?to=`
+(see the table above) accept any ISO 8601 datetime `zod` recognizes with an
+explicit offset (e.g. `2026-01-01T00:00:00+01:00`), not only UTC `Z`
+timestamps — an additive widening of what's accepted, not a behavior change
+for existing UTC-`Z` callers.
 
 ### Rewards & coupons
 

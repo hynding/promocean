@@ -1,8 +1,8 @@
 import { z } from 'zod'
 
 export const statsQuerySchema = z.object({
-  from: z.iso.datetime().optional(),
-  to: z.iso.datetime().optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
 })
 export type StatsQuery = z.infer<typeof statsQuerySchema>
 

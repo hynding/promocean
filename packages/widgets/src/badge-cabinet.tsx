@@ -1,15 +1,34 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AchievementStatus } from '@promocean/contracts'
-import { usePromocean } from './provider.js'
+import { usePromocean, usePromoceanUser } from './provider.js'
 
 export function BadgeCabinet() {
   const client = usePromocean()
+  const userId = usePromoceanUser()
   const [achievements, setAchievements] = useState<AchievementStatus[]>([])
 
   const refresh = useCallback(() => {
-    client.getAchievements().then(setAchievements).catch(() => {}) // fail silent-to-empty
-  }, [client])
+    // Unidentified: there's no user to fetch achievements for. Skip the fetch
+    // entirely (rather than letting it run and reject) — same posture as
+    // RewardsStore, and it avoids a spurious console.warn from a fetch that
+    // was never going to succeed.
+    if (!userId) return
+    // A failed refetch (whether the initial load or an unlock-triggered one)
+    // never blanks the list: setAchievements simply isn't called, so whatever
+    // was previously shown (or the initial empty state) stays put. The
+    // failure is still surfaced via console.warn rather than swallowed.
+    client.getAchievements().catch((err) => {
+      console.warn('[promocean] BadgeCabinet failed to fetch achievements; keeping previous list', err)
+      return undefined
+    }).then((achievements) => {
+      if (achievements) setAchievements(achievements)
+    })
+  }, [client, userId])
 
+  // userId in deps: an identify()/re-identify() after mount must refetch —
+  // otherwise identifying after mount would leave the cabinet empty forever,
+  // and re-identifying to a different user would keep showing the previous
+  // user's badges.
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => client.onUnlock(() => refresh()), [client, refresh])
 

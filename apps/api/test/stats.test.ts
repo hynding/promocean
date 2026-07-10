@@ -67,6 +67,12 @@ describe('GET /v1/stats', () => {
     expect((await res.json()).error.code).toBe('invalid_payload')
   })
 
+  it('accepts an offset-form `from` datetime', async () => {
+    const { app } = setup(skAuth())
+    const res = await app.request('/v1/stats?from=2026-07-01T00:00:00%2B02:00', { headers })
+    expect(res.status).toBe(200)
+  })
+
   it('forwards the parsed range to the stats store and echoes it back', async () => {
     const { app, fakes } = setup(skAuth())
     const res = await app.request('/v1/stats?from=2026-01-01T00:00:00.000Z&to=2026-01-31T00:00:00.000Z', { headers })

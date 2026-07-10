@@ -33,6 +33,7 @@ const stopScheduler = startLifecycleScheduler({
   redeliveryGraceMinutes,
   scanGraceMinutes,
   deadLetterTtlDays: envInt('WEBHOOK_DEAD_LETTER_TTL_DAYS', 30),
+  deliveredClaimsTtlDays: envInt('DELIVERED_CLAIMS_TTL_DAYS', 30),
 })
 const app = createApp({
   configStore: plane,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { LeaderboardResponse, LeaderboardWindow } from '@promocean/contracts'
-import { usePromocean } from './provider.js'
+import { usePromocean, usePromoceanUser } from './provider.js'
 
 type LeaderboardEntry = LeaderboardResponse['entries'][number]
 
@@ -14,6 +14,7 @@ export function Leaderboard({
   title?: string
 }) {
   const client = usePromocean()
+  const userId = usePromoceanUser()
   const [entries, setEntries] = useState<LeaderboardEntry[]>([])
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function Leaderboard({
         </thead>
         <tbody>
           {entries.map((entry) => {
-            const isCurrentUser = entry.userId === client.currentUserId
+            const isCurrentUser = entry.userId === userId
             return (
               <tr key={entry.userId}
                   data-promocean-current-user={isCurrentUser}

@@ -1,6 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createDb, runMigrations, PgEventStore, PgProgressStore, PgUsageStore, type Db } from '../src/index.js'
+import { createDb, runMigrations, PgProgressStore, PgUsageStore, type Db } from '../src/index.js'
 import type { Scope } from '@promocean/core'
 
 let container: StartedPostgreSqlContainer
@@ -15,21 +15,19 @@ beforeAll(async () => {
 })
 afterAll(async () => { await db.$client.end(); await container.stop() })
 
-describe('PgEventStore', () => {
-  it('inserts then dedupes on idempotency key', async () => {
-    const store = new PgEventStore(db)
-    const e = { userId: 'u1', type: 'lesson_completed', idempotencyKey: 'k1234567', occurredAt: new Date() }
-    expect((await store.insertEvent(scope, e)).deduped).toBe(false)
-    expect((await store.insertEvent(scope, e)).deduped).toBe(true)
-    expect((await store.insertEvent(otherScope, e)).deduped).toBe(false) // tenancy isolation
-  })
-})
+// Seeds achievement_progress directly (the only writer of that table is now PgIngestionStore;
+// these read-path tests just need a known row).
+const seedProgress = (s: Scope, userId: string, achievementId: string, current: number) =>
+  db.$client.query(
+    `insert into runtime.achievement_progress (project_id, environment, user_id, achievement_id, current) values ($1,$2,$3,$4,$5)
+     on conflict (project_id, environment, user_id, achievement_id) do update set current = excluded.current`,
+    [s.projectId, s.environment, userId, achievementId, current],
+  )
 
 describe('PgProgressStore', () => {
-  it('sets and reads progress scoped by tenant', async () => {
+  it('reads progress scoped by tenant', async () => {
     const store = new PgProgressStore(db)
-    await store.setProgress(scope, 'u1', 'a1', 3)
-    await store.setProgress(scope, 'u1', 'a1', 4)
+    await seedProgress(scope, 'u1', 'a1', 4)
     const counts = await store.getCounts(scope, 'u1', ['a1', 'a2'])
     expect(counts.get('a1')).toBe(4)
     expect(counts.get('a2')).toBeUndefined()

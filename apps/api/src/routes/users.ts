@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { EraseUserResponse, UserAchievementsResponse } from '@promocean/contracts'
 import type { Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
+import { isValidUserId } from '../validation.js'
 
 export function usersRoute(deps: AppDeps) {
   const app = new Hono()
@@ -11,7 +12,7 @@ export function usersRoute(deps: AppDeps) {
       return c.json({ error: { code: 'forbidden', message: 'Secret key required.' } }, 403)
     }
     const userId = c.req.param('userId')
-    if (userId.length < 1 || userId.length > 128) {
+    if (!isValidUserId(userId)) {
       return c.json({ error: { code: 'invalid_payload', message: 'Invalid userId.' } }, 400)
     }
     const scope: Scope = { projectId: auth.projectId, environment: auth.environment }

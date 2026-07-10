@@ -188,6 +188,55 @@ describe('PgIngestionStore engagement writes', () => {
   })
 })
 
+describe('migration 0009 — user_streaks composite primary key', () => {
+  it('swaps the unique index for a composite PK on a populated table without data loss', async () => {
+    // Reproduce the pre-0009 shape on a scratch table cloned from user_streaks (same columns,
+    // NOT NULLs and defaults), give it the OLD unique index, then populate it — exactly the
+    // state an upgraded production table starts from.
+    await db.$client.query(`create table runtime.streaks_pk_probe (like runtime.user_streaks including defaults)`)
+    await db.$client.query(`create unique index streaks_pk_probe_uq on runtime.streaks_pk_probe (project_id, environment, user_id)`)
+    await db.$client.query(
+      `insert into runtime.streaks_pk_probe (project_id, environment, user_id, current_streak, longest_streak, last_active_day)
+       values ('p','test','u1',3,5,'2026-01-01'),('p','test','u2',1,1,'2026-01-02'),('p','prod','u1',2,2,'2026-01-03')`,
+    )
+
+    // Apply migration 0009's two statements verbatim against the POPULATED table.
+    await db.$client.query(`DROP INDEX "runtime"."streaks_pk_probe_uq"`)
+    await db.$client.query(
+      `ALTER TABLE "runtime"."streaks_pk_probe" ADD CONSTRAINT "streaks_pk_probe_pk" PRIMARY KEY("project_id","environment","user_id")`,
+    )
+
+    // All rows survived the swap.
+    const { rows: countRows } = await db.$client.query(`select count(*)::int as n from runtime.streaks_pk_probe`)
+    expect(countRows[0].n).toBe(3)
+
+    // The composite PK now enforces the same uniqueness the old index did.
+    await expect(
+      db.$client.query(`insert into runtime.streaks_pk_probe (project_id, environment, user_id) values ('p','test','u1')`),
+    ).rejects.toThrow()
+
+    // Distinct key still inserts fine.
+    await db.$client.query(`insert into runtime.streaks_pk_probe (project_id, environment, user_id) values ('p','test','u3')`)
+    const { rows: afterRows } = await db.$client.query(`select count(*)::int as n from runtime.streaks_pk_probe`)
+    expect(afterRows[0].n).toBe(4)
+
+    await db.$client.query(`drop table runtime.streaks_pk_probe`)
+  })
+
+  it('the live user_streaks table rejects a duplicate (project, environment, user) via its PK', async () => {
+    // The real table, migrated to the composite PK, still guards the ingest streak upsert.
+    const store = new PgIngestionStore(db)
+    const userId = 'pk-live-user'
+    await store.ingestEvent(scope, { userId, type: 'lesson_completed', idempotencyKey: 'pk-live-1', occurredAt: new Date() }, [], '2026-01', { localDay: '2026-01-01', eventPoints: null, unlockPoints: {} })
+    await expect(
+      db.$client.query(
+        `insert into runtime.user_streaks (project_id, environment, user_id) values ($1,$2,$3)`,
+        [scope.projectId, scope.environment, userId],
+      ),
+    ).rejects.toThrow()
+  })
+})
+
 describe('PgEngagementStore', () => {
   it('getWallet returns COALESCE(sum) balance and the 20 most-recent rows newest-first', async () => {
     const store = new PgEngagementStore(db)

@@ -1,0 +1,2 @@
+DROP INDEX "runtime"."user_streaks_uq";--> statement-breakpoint
+ALTER TABLE "runtime"."user_streaks" ADD CONSTRAINT "user_streaks_project_id_environment_user_id_pk" PRIMARY KEY("project_id","environment","user_id");

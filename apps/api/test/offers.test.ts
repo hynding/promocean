@@ -37,10 +37,10 @@ describe('GET /v1/placements/:slug/offer', () => {
     expect((await res.json()).error.code).toBe('invalid_payload')
     expect(fakes.metrics.impressions).toEqual([])
   })
-  it('rejects an oversized userId query param', async () => {
+  it('ignores an oversized userId query param (dead param since the impression beacon moved client-side)', async () => {
     const { app } = setup()
     const res = await app.request(`/v1/placements/homepage-banner/offer?userId=${'x'.repeat(129)}`, { headers })
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(200)
   })
   it('fails open (empty active-events set) and logs via a child logger carrying the request id when getTimedEvents throws', async () => {
     const { app, fakes } = setup()

@@ -26,14 +26,34 @@ RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
 # `strapi build` (run via turbo) compiles the admin panel; it needs devDeps.
 RUN pnpm turbo run build --filter=cms
-# Drop dev deps in place; the built admin lives in apps/cms/build + .strapi and
-# survives the prune (only node_modules is pruned).
-RUN pnpm prune --prod
 
-# --- Stage 3: minimal non-root runtime ---
+# --- Stage 3: production-only dependency tree ---
+# `pnpm prune --prod` proved to be a no-op for the workspace virtual store
+# (dev deps survived in node_modules/.pnpm), so instead install prod deps from
+# scratch off the same pruned lockfile: this yields the exact pnpm symlink
+# topology with ONLY production packages (incl. sharp's musl prebuilts, which
+# arrive as optionalDependencies; sharp is on the workspace's
+# onlyBuiltDependencies list so its install script still runs here).
+FROM base AS prod-deps
+COPY --from=pruner /app/out/json/ .
+RUN pnpm install --prod --frozen-lockfile
+
+# --- Stage 4: minimal non-root runtime ---
 FROM base AS runner
 ENV NODE_ENV=production
-COPY --from=installer --chown=node:node /app .
+# Workspace skeleton (package.json files) + prod-only node_modules; the
+# relative pnpm symlinks stay valid because the whole tree moves together.
+COPY --from=prod-deps --chown=node:node /app .
+# Strapi runtime needs, all at appDir (apps/cms):
+#  - dist/           compiled server + admin panel (dist/build) + dist/src/index.js
+#  - tsconfig.json   `strapi start` reads its outDir to locate distDir
+#  - public/         static assets + local upload provider target
+#  - database/       app-level migrations dir (appDir/database/migrations)
+#  - favicon.png     strapi::favicon middleware resolves it at appDir root
+COPY --from=installer --chown=node:node /app/apps/cms/dist ./apps/cms/dist
+COPY --from=installer --chown=node:node /app/apps/cms/public ./apps/cms/public
+COPY --from=installer --chown=node:node /app/apps/cms/database ./apps/cms/database
+COPY --from=installer --chown=node:node /app/apps/cms/tsconfig.json /app/apps/cms/favicon.png ./apps/cms/
 USER node
 EXPOSE 1337
 # Strapi exposes /_health returning 204 with no auth — perfect for a probe.
