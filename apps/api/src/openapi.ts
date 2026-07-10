@@ -108,6 +108,10 @@ export function buildOpenApiDocument(version: string) {
             description: 'User data erased.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/eraseUserResponse' } } },
           },
+          '403': {
+            description: 'A publishable key was used; a secret key is required.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
+          },
           default: errorResponse,
         },
       },
@@ -177,7 +181,7 @@ export function buildOpenApiDocument(version: string) {
     '/v1/stats': {
       get: {
         summary: 'Aggregate project stats: totals, achievements, offers (with CTR), and timed events. Requires a secret key.',
-        description: 'For recurring timed events, participation is aggregated across every occurrence window intersecting the requested range, clamped to the most recent 400 occurrences per event.',
+        description: 'For recurring timed events, participation is aggregated across every occurrence window intersecting the requested range, clamped to the most recent 400 occurrences per event; historical windows of since-disabled events are included.',
         parameters: [
           { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
           { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },

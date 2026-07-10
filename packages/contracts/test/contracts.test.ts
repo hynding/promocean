@@ -152,6 +152,10 @@ describe('statsQuerySchema', () => {
     const result = statsQuerySchema.safeParse({})
     expect(result.success).toBe(true)
   })
+  it('accepts an offset-form ISO datetime for from/to', () => {
+    const result = statsQuerySchema.safeParse({ from: '2026-07-01T00:00:00+02:00', to: '2026-07-31T00:00:00+02:00' })
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('offerImpressionResponseSchema', () => {

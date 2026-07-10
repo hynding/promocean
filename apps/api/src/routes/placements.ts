@@ -11,12 +11,8 @@ export function placementsRoute(deps: AppDeps) {
     const auth = c.get('auth')
     const scope: Scope = { projectId: auth.projectId, environment: auth.environment }
     const slug = c.req.param('slug')
-    const userId = c.req.query('userId') ?? null
     if (!PLACEMENT_SLUG_PATTERN.test(slug) || slug.length > 64) {
       return c.json({ error: { code: 'invalid_payload', message: 'Invalid placement slug.' } }, 400)
-    }
-    if (userId !== null && (userId.length < 1 || userId.length > 128)) {
-      return c.json({ error: { code: 'invalid_payload', message: 'Invalid userId.' } }, 400)
     }
     const offers = await deps.configStore.getOffers(scope.projectId)
     const now = new Date()

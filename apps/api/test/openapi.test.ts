@@ -45,6 +45,29 @@ describe('GET /v1/openapi.json', () => {
     expect(responses['404']).toBeDefined()
   })
 
+  it('documents a uniform 403 response on every sk-only endpoint', async () => {
+    const res = await app().request('/v1/openapi.json')
+    const doc = await res.json()
+    const skEndpoints: Array<{ path: string; method: 'get' | 'post' | 'delete' }> = [
+      { path: '/v1/stats', method: 'get' },
+      { path: '/v1/users/{userId}', method: 'delete' },
+      { path: '/v1/coupons/validate', method: 'post' },
+      { path: '/v1/coupons/redeem', method: 'post' },
+      { path: '/v1/achievements/{id}/backfill', method: 'post' },
+    ]
+    for (const { path, method } of skEndpoints) {
+      const responses = doc.paths[path][method].responses
+      expect(responses['403']).toBeDefined()
+      expect(responses['403'].content['application/json'].schema).toEqual({ $ref: '#/components/schemas/errorEnvelope' })
+    }
+  })
+
+  it('documents the disabled-events inclusion note on the stats endpoint', async () => {
+    const res = await app().request('/v1/openapi.json')
+    const doc = await res.json()
+    expect(doc.paths['/v1/stats'].get.description).toContain('historical windows of since-disabled events are included')
+  })
+
   it('includes the error envelope schema', async () => {
     const res = await app().request('/v1/openapi.json')
     const doc = await res.json()

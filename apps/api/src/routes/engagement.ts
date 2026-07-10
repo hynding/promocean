@@ -3,15 +3,12 @@ import { z } from 'zod'
 import { leaderboardWindowSchema, type LeaderboardResponse, type StreakResponse, type WalletResponse } from '@promocean/contracts'
 import type { Scope } from '@promocean/core'
 import type { AppDeps } from '../app.js'
+import { isValidUserId } from '../validation.js'
 
 const leaderboardQuerySchema = z.object({
   window: leaderboardWindowSchema.default('all'),
   limit: z.coerce.number().int().min(1).max(100).default(10),
 })
-
-function isValidUserId(userId: string) {
-  return userId.length >= 1 && userId.length <= 128
-}
 
 /**
  * Wallet, streak, and leaderboard read endpoints. Housed in one file: they share nothing but
