@@ -7,7 +7,16 @@ export function BadgeCabinet() {
   const [achievements, setAchievements] = useState<AchievementStatus[]>([])
 
   const refresh = useCallback(() => {
-    client.getAchievements().then(setAchievements).catch(() => {}) // fail silent-to-empty
+    // A failed refetch (whether the initial load or an unlock-triggered one)
+    // never blanks the list: setAchievements simply isn't called, so whatever
+    // was previously shown (or the initial empty state) stays put. The
+    // failure is still surfaced via console.warn rather than swallowed.
+    client.getAchievements().catch((err) => {
+      console.warn('[promocean] BadgeCabinet failed to fetch achievements; keeping previous list', err)
+      return undefined
+    }).then((achievements) => {
+      if (achievements) setAchievements(achievements)
+    })
   }, [client])
 
   useEffect(() => { refresh() }, [refresh])

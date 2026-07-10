@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Reward, WalletResponse } from '@promocean/contracts'
 import { PromoceanApiError } from '@promocean/sdk'
-import { usePromocean } from './provider.js'
+import { usePromocean, usePromoceanUser } from './provider.js'
 
 const CLAIM_ERROR_MESSAGES: Record<string, string> = {
   insufficient_points: 'Not enough points',
@@ -11,6 +11,7 @@ const CLAIM_ERROR_MESSAGES: Record<string, string> = {
 
 export function RewardsStore({ title }: { title?: string }) {
   const client = usePromocean()
+  const userId = usePromoceanUser()
   const [rewards, setRewards] = useState<Reward[]>([])
   const [wallet, setWallet] = useState<WalletResponse | null>(null)
   const [pending, setPending] = useState<Record<string, boolean>>({})
@@ -29,15 +30,15 @@ export function RewardsStore({ title }: { title?: string }) {
   const load = useCallback(() => Promise.all([client.listRewards(), client.getWallet()]), [client])
 
   useEffect(() => {
-    if (!client.currentUserId) return
+    if (!userId) return
     let cancelled = false
     load().then(([r, w]) => {
       if (!cancelled) { setRewards(r); setWallet(w) }
     }).catch(() => {}) // fail silent-to-empty, matches Leaderboard/Placement pattern
     return () => { cancelled = true }
-  }, [client, load])
+  }, [client, load, userId])
 
-  if (!client.currentUserId) return null
+  if (!userId) return null
 
   const handleClaim = (slug: string) => {
     setPending((p) => ({ ...p, [slug]: true }))
@@ -62,9 +63,14 @@ export function RewardsStore({ title }: { title?: string }) {
     }).catch((err) => {
       if (!mountedRef.current) return
       setPending((p) => ({ ...p, [slug]: false }))
+      // Only a PromoceanApiError's message is surfaced (mapped, or its own message
+      // as a fallback for unmapped codes) — it comes from the server's structured
+      // error response. Any other rejection (network failure, unexpected
+      // exception) is never shown verbatim; it could leak internals, so it always
+      // renders a generic message instead.
       const message = err instanceof PromoceanApiError
         ? (CLAIM_ERROR_MESSAGES[err.code] ?? err.message)
-        : (err instanceof Error ? err.message : 'Claim failed')
+        : 'Claim failed'
       setClaimErrors((e) => ({ ...e, [slug]: message }))
     })
   }

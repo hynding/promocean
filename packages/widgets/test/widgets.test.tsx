@@ -13,36 +13,78 @@ afterEach(cleanup)
 
 function fakeClient(achievements: unknown[] = [], offer: unknown = null) {
   const listeners = new Set<(u: UnlockPayload) => void>()
+  const userChangeListeners = new Set<(u: string | undefined) => void>()
+  const client: any = {
+    onUnlock: (cb: (u: UnlockPayload) => void) => { listeners.add(cb); return () => listeners.delete(cb) },
+    onUserChange: (cb: (u: string | undefined) => void) => { userChangeListeners.add(cb); return () => userChangeListeners.delete(cb) },
+    getAchievements: vi.fn().mockResolvedValue(achievements),
+    getPlacementOffer: vi.fn().mockResolvedValue(offer),
+    getLiveEvents: vi.fn().mockResolvedValue([]),
+    clickOffer: vi.fn().mockResolvedValue(undefined),
+    recordImpression: vi.fn().mockResolvedValue(undefined),
+    dismissOffer: vi.fn(),
+    isOfferDismissed: vi.fn().mockReturnValue(false),
+    getLeaderboard: vi.fn().mockResolvedValue({ window: 'all', entries: [] }),
+    listRewards: vi.fn().mockResolvedValue([]),
+    getWallet: vi.fn().mockResolvedValue({ balance: 0, recent: [] }),
+    claimReward: vi.fn().mockResolvedValue({ code: 'CODE-1', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 0 }),
+    currentUserId: undefined as string | undefined,
+  }
   return {
-    client: {
-      onUnlock: (cb: (u: UnlockPayload) => void) => { listeners.add(cb); return () => listeners.delete(cb) },
-      getAchievements: vi.fn().mockResolvedValue(achievements),
-      getPlacementOffer: vi.fn().mockResolvedValue(offer),
-      getLiveEvents: vi.fn().mockResolvedValue([]),
-      clickOffer: vi.fn().mockResolvedValue(undefined),
-      recordImpression: vi.fn().mockResolvedValue(undefined),
-      dismissOffer: vi.fn(),
-      isOfferDismissed: vi.fn().mockReturnValue(false),
-      getLeaderboard: vi.fn().mockResolvedValue({ window: 'all', entries: [] }),
-      listRewards: vi.fn().mockResolvedValue([]),
-      getWallet: vi.fn().mockResolvedValue({ balance: 0, recent: [] }),
-      claimReward: vi.fn().mockResolvedValue({ code: 'CODE-1', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 0 }),
-      currentUserId: undefined as string | undefined,
-    } as any,
+    client,
     emit: (u: UnlockPayload) => listeners.forEach((cb) => cb(u)),
+    // Fires the fake's own onUserChange listeners AND mirrors client.currentUserId,
+    // mimicking the real SDK's identify() (including its same-id no-op guard) so
+    // provider tests can drive identity changes the same way the real client would.
+    identify: (userId: string | undefined) => {
+      if (userId === client.currentUserId) return
+      client.currentUserId = userId
+      userChangeListeners.forEach((cb) => cb(userId))
+    },
+    userChangeListenerCount: () => userChangeListeners.size,
   }
 }
 
 describe('UnlockToast', () => {
   it('renders an unlock in a polite live region and auto-dismisses', async () => {
     vi.useFakeTimers()
-    const { client, emit } = fakeClient()
-    render(<PromoceanProvider client={client}><UnlockToast durationMs={1000} /></PromoceanProvider>)
-    act(() => emit({ achievementId: 'a1', name: 'First Lesson', unlockedAt: '2026-07-06T00:00:00.000Z' }))
-    expect(screen.getByRole('status')).toHaveTextContent('First Lesson')
-    act(() => { vi.advanceTimersByTime(1100) })
-    expect(screen.getByRole('status')).not.toHaveTextContent('First Lesson')
-    vi.useRealTimers()
+    try {
+      const { client, emit } = fakeClient()
+      render(<PromoceanProvider client={client}><UnlockToast durationMs={1000} /></PromoceanProvider>)
+      act(() => emit({ achievementId: 'a1', name: 'First Lesson', unlockedAt: '2026-07-06T00:00:00.000Z' }))
+      expect(screen.getByRole('status')).toHaveTextContent('First Lesson')
+      act(() => { vi.advanceTimersByTime(1100) })
+      expect(screen.getByRole('status')).not.toHaveTextContent('First Lesson')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('two unlocks sharing the same achievementId+unlockedAt millisecond render as two distinct toasts, and each auto-dismisses independently by id', async () => {
+    vi.useFakeTimers()
+    try {
+      const { client, emit } = fakeClient()
+      render(<PromoceanProvider client={client}><UnlockToast durationMs={1000} /></PromoceanProvider>)
+      const duplicate = { achievementId: 'a1', name: 'Duplicate Unlock', unlockedAt: '2026-07-06T00:00:00.000Z' }
+      // Same achievementId+unlockedAt content, but emitted at different fake-clock
+      // times — this is the scenario a content-derived key collides on. Staggering
+      // the emits (rather than firing both at once) also lets us drive each
+      // toast's auto-dismiss independently below.
+      act(() => emit(duplicate))
+      act(() => { vi.advanceTimersByTime(400) })
+      act(() => emit(duplicate))
+      const status = screen.getByRole('status')
+      expect(status.children).toHaveLength(2)
+      // The first toast's 1000ms timer elapses (400 + 600 = 1000ms since it fired);
+      // the second toast, emitted 400ms later, still has 400ms left on its own timer.
+      act(() => { vi.advanceTimersByTime(600) })
+      expect(status.children).toHaveLength(1)
+      // The remaining toast is the second one, still mid-flight.
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(status.children).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -64,6 +106,24 @@ describe('BadgeCabinet', () => {
     await waitFor(() => expect(client.getAchievements).toHaveBeenCalledTimes(1))
     act(() => emit({ achievementId: 'a1', name: 'First Lesson', unlockedAt: '2026-07-06T00:00:00.000Z' }))
     await waitFor(() => expect(client.getAchievements).toHaveBeenCalledTimes(2))
+  })
+  it('keeps the previously fetched list and warns when the unlock-triggered refetch fails', async () => {
+    const { client, emit } = fakeClient([
+      { achievementId: 'a1', name: 'First Lesson', description: null, artworkUrl: null, current: 1, target: 1, unlockedAt: '2026-07-06T00:00:00.000Z' },
+    ])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      render(<PromoceanProvider client={client}><BadgeCabinet /></PromoceanProvider>)
+      await waitFor(() => expect(screen.getByText('First Lesson')).toBeDefined())
+      client.getAchievements.mockRejectedValueOnce(new Error('down'))
+      act(() => emit({ achievementId: 'a2', name: 'Getting Started', unlockedAt: '2026-07-06T00:00:00.000Z' }))
+      await waitFor(() => expect(client.getAchievements).toHaveBeenCalledTimes(2))
+      // Stale list stays put — never blanked — and the failure is surfaced via warn.
+      expect(screen.getByText('First Lesson')).toBeDefined()
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
@@ -445,5 +505,113 @@ describe('RewardsStore', () => {
     await act(async () => { resolveRewards([reward()]) })
     expect(consoleError).not.toHaveBeenCalled()
     consoleError.mockRestore()
+  })
+
+  it('populates once identify() fires after mount (reactive provider, not a static prop)', async () => {
+    const { client, identify } = fakeClient()
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    const { container } = render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    expect(container.querySelector('[data-promocean-rewards]')).toBeNull()
+    expect(client.listRewards).not.toHaveBeenCalled()
+    act(() => identify('u1'))
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    expect(client.listRewards).toHaveBeenCalledTimes(1)
+    expect(client.getWallet).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-identifying to a different user refetches rewards and wallet', async () => {
+    const { client, identify } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(client.listRewards).toHaveBeenCalledTimes(1))
+    act(() => identify('u2'))
+    await waitFor(() => expect(client.listRewards).toHaveBeenCalledTimes(2))
+    expect(client.getWallet).toHaveBeenCalledTimes(2)
+  })
+
+  it('re-identifying with the same id is a no-op — no extra refetch (provider does not re-render on a no-op notify)', async () => {
+    const { client, identify } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(client.listRewards).toHaveBeenCalledTimes(1))
+    act(() => identify('u1')) // fakeClient.identify() itself no-ops on same id, matching the real SDK
+    expect(client.listRewards).toHaveBeenCalledTimes(1)
+  })
+
+  it('unsubscribes from onUserChange on unmount', async () => {
+    const { client, userChangeListenerCount } = fakeClient()
+    const { unmount } = render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    expect(userChangeListenerCount()).toBe(1)
+    unmount()
+    expect(userChangeListenerCount()).toBe(0)
+  })
+
+  it('renders err.message for an unmapped PromoceanApiError code', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn().mockRejectedValue(new PromoceanApiError('weird_unmapped_code', 'custom server message', 400))
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('custom server message'))
+  })
+
+  it('renders a generic message for a non-ApiError claim rejection, not the raw error text', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    client.claimReward = vi.fn().mockRejectedValue(new Error('ECONNRESET at socket 4'))
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeDefined())
+    expect(screen.getByRole('alert')).toHaveTextContent('Claim failed')
+    expect(screen.queryByText(/ECONNRESET/)).toBeNull()
+  })
+
+  it('does not warn on state updates when unmounted before a claim resolves', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward()])
+    client.getWallet = vi.fn().mockResolvedValue({ balance: 250, recent: [] })
+    let resolveClaim!: (v: unknown) => void
+    client.claimReward = vi.fn().mockReturnValue(new Promise((resolve) => { resolveClaim = resolve }))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { unmount } = render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+      await waitFor(() => expect(screen.getByText('Sticker Pack')).toBeDefined())
+      act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+      unmount()
+      await act(async () => {
+        resolveClaim({ code: 'ABC-123', rewardSlug: 'r1', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 100 })
+      })
+      expect(consoleError).not.toHaveBeenCalled()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('a post-claim wallet refetch that drops the balance flips a now-unaffordable reward to disabled "Not enough points"', async () => {
+    const { client } = fakeClient()
+    client.currentUserId = 'u1'
+    client.listRewards = vi.fn().mockResolvedValue([reward({ slug: 'demo_discount', name: 'Demo Discount', pointsPrice: 100 })])
+    client.getWallet = vi.fn()
+      .mockResolvedValueOnce({ balance: 250, recent: [] })
+      .mockResolvedValueOnce({ balance: 50, recent: [] })
+    client.claimReward = vi.fn().mockResolvedValue({ code: 'ABC-123', rewardSlug: 'demo_discount', claimedAt: '2026-07-06T00:00:00.000Z', pointsSpent: 200 })
+    render(<PromoceanProvider client={client}><RewardsStore /></PromoceanProvider>)
+    await waitFor(() => expect(screen.getByText('Demo Discount')).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Claim' })).not.toBeDisabled()
+    act(() => { screen.getByRole('button', { name: 'Claim' }).click() })
+    await waitFor(() => expect(client.getWallet).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Not enough points' })).toBeDisabled())
   })
 })
