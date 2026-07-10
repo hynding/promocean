@@ -1,18 +1,28 @@
 {
   "name": "@promocean/widgets",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
-  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
   "dependencies": {
     "@promocean/contracts": "workspace:*",
     "@promocean/sdk": "workspace:*"
   },
-  "peerDependencies": { "react": ">=18" },
+  "peerDependencies": {
+    "react": ">=18"
+  },
   "devDependencies": {
     "@promocean/config": "workspace:*",
     "@testing-library/jest-dom": "^6.6.0",
