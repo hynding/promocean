@@ -62,6 +62,13 @@ describe('GET /v1/openapi.json', () => {
     }
   })
 
+  it('no longer documents the dead userId query param on the placements offer endpoint', async () => {
+    const res = await app().request('/v1/openapi.json')
+    const doc = await res.json()
+    const parameters = doc.paths['/v1/placements/{slug}/offer'].get.parameters
+    expect(parameters).toEqual([{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }])
+  })
+
   it('documents the disabled-events inclusion note on the stats endpoint', async () => {
     const res = await app().request('/v1/openapi.json')
     const doc = await res.json()

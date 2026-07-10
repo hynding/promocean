@@ -121,7 +121,6 @@ export function buildOpenApiDocument(version: string) {
         summary: 'Resolve the currently active offer for a placement.',
         parameters: [
           { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'userId', in: 'query', required: false, schema: { type: 'string' } },
         ],
         responses: {
           '200': {
