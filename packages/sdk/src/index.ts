@@ -36,6 +36,7 @@ export class Promocean {
   private maxRetries: number
   private chain: Promise<unknown> = Promise.resolve()
   private listeners = new Set<(u: UnlockPayload) => void>()
+  private userChangeListeners = new Set<(u: string | undefined) => void>()
   private dismissedFallback = new Set<string>()
 
   constructor(private opts: PromoceanOptions) {
@@ -44,13 +45,24 @@ export class Promocean {
     this.maxRetries = opts.maxRetries ?? 3
   }
 
-  identify(userId: string): void { this.userId = userId }
+  identify(userId: string): void {
+    if (userId === this.userId) return
+    this.userId = userId
+    for (const cb of this.userChangeListeners) {
+      try { cb(userId) } catch (err) { console.warn('[promocean] onUserChange listener threw', err) }
+    }
+  }
 
   get currentUserId(): string | undefined { return this.userId }
 
   onUnlock(cb: (u: UnlockPayload) => void): () => void {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
+  }
+
+  onUserChange(cb: (userId: string | undefined) => void): () => void {
+    this.userChangeListeners.add(cb)
+    return () => this.userChangeListeners.delete(cb)
   }
 
   private async request(path: string, init?: RequestInit, { useSecretKey = false }: { useSecretKey?: boolean } = {}): Promise<Response> {
@@ -73,6 +85,7 @@ export class Promocean {
       } catch (err) {
         if (err instanceof PromoceanApiError) throw err
         lastErr = err
+        lastStatus = undefined
       }
     }
     if (lastStatus !== undefined) throw new PromoceanApiError('internal_error', `server responded ${lastStatus} after ${this.maxRetries + 1} attempts`, lastStatus)
@@ -89,7 +102,11 @@ export class Promocean {
         body: JSON.stringify({ userId: this.userId, type, idempotencyKey, tzOffsetMinutes, ...(meta ? { meta } : {}) }),
       })
       const parsed = trackEventResponseSchema.parse(await res.json())
-      for (const unlock of parsed.unlocks) for (const cb of this.listeners) cb(unlock)
+      for (const unlock of parsed.unlocks) {
+        for (const cb of this.listeners) {
+          try { cb(unlock) } catch (err) { console.warn('[promocean] onUnlock listener threw', err) }
+        }
+      }
       return parsed
     }
     const result = this.chain.then(run, run)

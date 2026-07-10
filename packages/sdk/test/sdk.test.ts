@@ -47,10 +47,86 @@ describe('track', () => {
     const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
     await expect(c.track('lesson_completed')).rejects.toThrow(/identify/)
   })
-  it('throws PromoceanApiError after exhausting 5xx retries', async () => {
+  it('throws PromoceanApiError after exhausting all-5xx retries', async () => {
     const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('', { status: 503 })))
-    await expect(client(fetchImpl, { maxRetries: 1 }).track('lesson_completed')).rejects.toThrow('internal_error')
+    const err = await client(fetchImpl, { maxRetries: 1 }).track('lesson_completed').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(PromoceanApiError)
+    expect((err as PromoceanApiError).status).toBe(503)
     expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+  it('throws a plain Error (not PromoceanApiError) when a 5xx is followed by a network failure on the final attempt', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(new Response('', { status: 500 })))
+      .mockImplementationOnce(() => Promise.reject(new Error('network down')))
+    const err = await client(fetchImpl, { maxRetries: 1 }).track('lesson_completed').catch((e: unknown) => e)
+    expect(err).not.toBeInstanceOf(PromoceanApiError)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe('network down')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+  it('a throwing onUnlock listener does not prevent other listeners or the resolved result; warns via console.warn', async () => {
+    const c = client(vi.fn().mockImplementation(() => ok(trackOk)))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const seen: string[] = []
+      c.onUnlock(() => { throw new Error('boom') })
+      c.onUnlock((u) => seen.push(u.name))
+      await expect(c.track('lesson_completed')).resolves.toBeDefined()
+      expect(seen).toEqual(['First Lesson'])
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
+describe('onUserChange', () => {
+  it('fires on identify with a new id, payload is the new id', () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    const seen: (string | undefined)[] = []
+    c.onUserChange((u) => seen.push(u))
+    c.identify('u1')
+    expect(seen).toEqual(['u1'])
+  })
+  it('does not fire when re-identifying with the same id', () => {
+    const c = client(vi.fn())
+    const seen: (string | undefined)[] = []
+    c.onUserChange((u) => seen.push(u))
+    c.identify('u1')
+    expect(seen).toEqual([])
+  })
+  it('notifies all subscribed listeners', () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    const a: (string | undefined)[] = []
+    const b: (string | undefined)[] = []
+    c.onUserChange((u) => a.push(u))
+    c.onUserChange((u) => b.push(u))
+    c.identify('u1')
+    expect(a).toEqual(['u1'])
+    expect(b).toEqual(['u1'])
+  })
+  it('stops delivering after unsubscribe', () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    const seen: (string | undefined)[] = []
+    const unsubscribe = c.onUserChange((u) => seen.push(u))
+    unsubscribe()
+    c.identify('u1')
+    expect(seen).toEqual([])
+  })
+  it('a throwing listener does not prevent identify or other listeners; warns via console.warn', () => {
+    const c = new Promocean({ publishableKey: 'pk', baseUrl: 'http://api.test', fetchImpl: vi.fn() })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const seen: (string | undefined)[] = []
+      c.onUserChange(() => { throw new Error('boom') })
+      c.onUserChange((u) => seen.push(u))
+      expect(() => c.identify('u1')).not.toThrow()
+      expect(c.currentUserId).toBe('u1')
+      expect(seen).toEqual(['u1'])
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
