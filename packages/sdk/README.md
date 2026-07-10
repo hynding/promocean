@@ -88,6 +88,32 @@ await promocean.redeemCoupon(code)                    // { redeemed: true, rewar
 throw if called before a user is identified. `getPlacementOffer()` and
 `getLiveEvents()` work anonymously (no `userId` required).
 
+Re-identifying an already-identified client to a **different** id is fully
+supported on the same client instance — you don't need to construct a new
+`Promocean` to switch users:
+
+```ts
+const unsubscribe = promocean.onUserChange((userId) => {
+  console.log('now identified as', userId)
+})
+
+promocean.identify('user-123')
+promocean.identify('user-456') // fires the listener above with 'user-456'
+promocean.identify('user-456') // no-op: same id, listener does NOT fire again
+// later: unsubscribe()
+```
+
+`onUserChange(cb)` only fires on an actual identity change — calling
+`identify()` again with the id the client is already identified as is a
+no-op and never notifies listeners. This is what
+[`@promocean/widgets`](../widgets/README.md)'s `<PromoceanProvider/>` builds
+on to keep widgets (the `<Leaderboard/>` current-user highlight,
+`<RewardsStore/>`'s fetch) in sync with the identified user reactively —
+see that package's README for the `usePromoceanUser()` hook. Consuming the
+SDK directly (no widgets), `currentUserId` still reflects the identity
+synchronously at any point in time; `onUserChange` is only needed if you
+want to react to a *change* rather than read the current value.
+
 ### Points, streaks, leaderboards
 
 ```ts
@@ -260,6 +286,31 @@ click-tracking call never breaks the host page's navigation.
 Retries are built in for 5xx and network failures (exponential backoff,
 `maxRetries` attempts). 4xx errors surface immediately as `PromoceanApiError`
 without retrying.
+
+**What you get after retries are exhausted depends on the *last* attempt's
+failure mode, not the first:** if the final attempt received a 5xx response,
+the SDK throws `PromoceanApiError('internal_error', ..., status)` (so
+`err.status` reflects the server's actual last status code). If the final
+attempt instead failed at the network level (timeout, DNS failure, connection
+reset — no response at all), the SDK throws that underlying error as a plain
+`Error` (or rethrows it as-is if it already was one), **not** a
+`PromoceanApiError` — there's no HTTP status to attach. In other words, a
+call that flips between 5xx responses and network failures across its
+retries surfaces whichever kind of failure happened on the very last
+attempt:
+
+```ts
+try {
+  await promocean.track('lesson_completed')
+} catch (err) {
+  if (err instanceof PromoceanApiError) {
+    // last attempt got a real (non-2xx) HTTP response
+  } else {
+    // last attempt failed at the network level — a plain Error, not
+    // PromoceanApiError; there's no err.code/err.status to read here
+  }
+}
+```
 
 ## Security note: creative URLs
 
