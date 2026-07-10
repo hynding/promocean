@@ -14,6 +14,7 @@
     "strapi": "strapi",
     "typecheck": "tsc --noEmit",
     "test": "echo ok",
+    "verify:lifecycles": "tsx scripts/verify-lifecycles.ts",
     "upgrade": "npx @strapi/upgrade latest",
     "upgrade:dry": "npx @strapi/upgrade latest --dry"
   },
@@ -30,8 +31,10 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "tsx": "^4.23.0",
     "typescript": "^5"
   },
   "engines": {
