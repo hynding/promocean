@@ -475,6 +475,7 @@ export interface ApiAchievementAchievement extends Struct.CollectionTypeSchema {
       Schema.Attribute.DefaultTo<0>;
     project: Schema.Attribute.Relation<'manyToOne', 'api::project.project'>;
     publishedAt: Schema.Attribute.DateTime;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     targetCount: Schema.Attribute.Integer &
       Schema.Attribute.Required &
       Schema.Attribute.SetMinMax<
@@ -559,6 +560,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
       Schema.Attribute.DefaultTo<0>;
     project: Schema.Attribute.Relation<'manyToOne', 'api::project.project'>;
     publishedAt: Schema.Attribute.DateTime;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     startsAt: Schema.Attribute.DateTime;
     timedEvent: Schema.Attribute.Relation<
       'manyToOne',
@@ -750,6 +752,7 @@ export interface ApiTimedEventTimedEvent extends Struct.CollectionTypeSchema {
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'none'>;
     recurrenceEndsAt: Schema.Attribute.DateTime;
+    slug: Schema.Attribute.String & Schema.Attribute.Required;
     startsAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

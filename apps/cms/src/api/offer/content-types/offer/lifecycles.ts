@@ -1,12 +1,5 @@
 import { errors } from '@strapi/utils'
 
-const MS_PER_DAY = 86_400_000
-const INTERVAL_MS: Record<string, number> = {
-  daily: MS_PER_DAY,
-  weekly: 7 * MS_PER_DAY,
-  monthly: 28 * MS_PER_DAY,
-}
-
 const SLUG_PATTERN = /^[a-z][a-z0-9_-]*$/
 
 function fail(message: string): never {
@@ -14,14 +7,19 @@ function fail(message: string): never {
 }
 
 // Merge incoming (possibly partial, on update) data over the current row so
-// cross-field validation always sees the resulting full record. Must populate
-// `project` — the S8 lesson: without it, resolveProjectId below has nothing
-// to resolve on update and the slug-uniqueness check silently no-ops.
+// cross-field validation always sees the resulting full record.
 async function loadCurrent(event: any): Promise<Record<string, any>> {
   const where = event.params.where
   if (!where) return {}
-  const existing = await strapi.db.query('api::timed-event.timed-event').findOne({ where, populate: ['project'] })
+  const existing = await strapi.db.query('api::offer.offer').findOne({ where, populate: ['project'] })
   return existing ?? {}
+}
+
+function validate(merged: Record<string, any>) {
+  const slug = merged.slug
+  if (typeof slug !== 'string' || !SLUG_PATTERN.test(slug)) {
+    fail(`slug must match ${SLUG_PATTERN} (got: ${JSON.stringify(slug)})`)
+  }
 }
 
 // Relation values arrive in whatever shape the caller used: a raw internal
@@ -59,44 +57,9 @@ async function checkSlugUnique(event: any, merged: Record<string, any>) {
   if (existingId != null) {
     where.id = { $ne: existingId }
   }
-  const count = await strapi.db.query('api::timed-event.timed-event').count({ where })
+  const count = await strapi.db.query('api::offer.offer').count({ where })
   if (count > 0) {
     fail(`slug "${slug}" is already in use for this project`)
-  }
-}
-
-function validate(merged: Record<string, any>) {
-  const slug = merged.slug
-  if (typeof slug !== 'string' || !SLUG_PATTERN.test(slug)) {
-    fail(`slug must match ${SLUG_PATTERN} (got: ${JSON.stringify(slug)})`)
-  }
-
-  const startsAt = merged.startsAt
-  const endsAt = merged.endsAt
-  const startsAtMs = startsAt != null ? new Date(startsAt).getTime() : null
-  const endsAtMs = endsAt != null ? new Date(endsAt).getTime() : null
-
-  if (startsAtMs != null && endsAtMs != null) {
-    if (!(endsAtMs > startsAtMs)) {
-      fail('endsAt must be after startsAt')
-    }
-  }
-
-  const recurrence = merged.recurrence ?? 'none'
-  if (recurrence !== 'none') {
-    const intervalMs = INTERVAL_MS[recurrence]
-    if (intervalMs != null && startsAtMs != null && endsAtMs != null) {
-      if (endsAtMs - startsAtMs > intervalMs) {
-        fail(`endsAt - startsAt must be at most ${intervalMs}ms for recurrence "${recurrence}"`)
-      }
-    }
-
-    const recurrenceEndsAt = merged.recurrenceEndsAt
-    if (recurrenceEndsAt != null && startsAtMs != null) {
-      if (!(new Date(recurrenceEndsAt).getTime() > startsAtMs)) {
-        fail('recurrenceEndsAt must be after startsAt')
-      }
-    }
   }
 }
 

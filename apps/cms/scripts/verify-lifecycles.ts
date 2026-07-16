@@ -28,6 +28,11 @@
  *      (from `@strapi/utils`) specifically — any other error type is its own
  *      distinct finding, since a bare "it threw" can't distinguish the check
  *      firing from something upstream (e.g. resolveProjectId) crashing.
+ *      Sprint 11: the same per-shape loop also exercises the slug lifecycle
+ *      (regex rejection on create, in-project duplicate rejection on update,
+ *      self-update-with-unchanged-slug staying clean) for achievement, offer,
+ *      and timed-event — the three content types that gained `slug` alongside
+ *      reward's pre-existing one.
  *   2. Duplicate staticCode scan (#20.2) — read-only: groups static rewards
  *      by (project, staticCode) across the whole target DB; any duplicate
  *      group is a finding. No auto-fix — operator decides. Pages explicitly
@@ -140,6 +145,62 @@ async function assertValidationErrorFires(probe: string, shapeName: string, labe
   finding(probe, `${label} did NOT fire on update with project shape "${shapeName}" — silently skipped`)
 }
 
+// Generic per-content-type slug lifecycle check, shared across achievement,
+// offer, and timed-event (each mirrors the reward slug pattern exactly —
+// see their lifecycles.ts files). Exercises, for a given project relation
+// shape:
+//   - regex rejection on create (invalid slug thrown as ValidationError)
+//   - in-project duplicate rejection on update (b's slug -> a's slug)
+//   - self-update-with-unchanged-slug staying clean (the self-exclusion
+//     `where.id = { $ne: existingId }` must not flag a row against itself)
+// `buildData` supplies the type-specific required fields (e.g. achievement's
+// eventType/targetCount, offer's headline, timed-event's startsAt/endsAt)
+// alongside name/slug.
+async function checkSlugLifecycle(
+  app: any,
+  uid: string,
+  probePrefix: string,
+  shapeName: string,
+  shapeVal: unknown,
+  buildData: (name: string, slug: string) => Record<string, any>,
+) {
+  let aId: string | undefined
+  let bId: string | undefined
+  try {
+    const a = await app.documents(uid).create({ data: { ...buildData(`Verify A ${shapeName}`, `verify-a-${shapeName}`), project: shapeVal } })
+    aId = a.documentId
+    const b = await app.documents(uid).create({ data: { ...buildData(`Verify B ${shapeName}`, `verify-b-${shapeName}`), project: shapeVal } })
+    bId = b.documentId
+
+    try {
+      await app.documents(uid).create({ data: { ...buildData(`Verify Bad ${shapeName}`, '1-bad-slug'), project: shapeVal } })
+      finding(`${probePrefix}-regex`, `slug regex rejection did NOT fire on create with project shape "${shapeName}" — invalid slug "1-bad-slug" was accepted`)
+    } catch (e: any) {
+      if (isValidationError(e)) {
+        ok(`slug regex rejection fired on create (shape: ${shapeName})`)
+      } else {
+        finding(`${probePrefix}-regex`, `shape "${shapeName}": invalid-slug create threw a non-validation error: ${e?.message ?? String(e)}`)
+      }
+    }
+
+    await assertValidationErrorFires(`${probePrefix}-duplicate`, shapeName, 'slug uniqueness check', () =>
+      app.documents(uid).update({ documentId: bId!, data: { slug: a.slug, project: shapeVal } }),
+    )
+
+    try {
+      await app.documents(uid).update({ documentId: bId!, data: { slug: b.slug, project: shapeVal } })
+      ok(`self-update with unchanged slug stayed clean (shape: ${shapeName})`)
+    } catch (e: any) {
+      finding(`${probePrefix}-self-update`, `shape "${shapeName}": self-update with unchanged slug incorrectly threw: ${e?.message ?? String(e)}`)
+    }
+  } catch (e: any) {
+    finding(`${probePrefix}-setup`, `setup failed for shape "${shapeName}": ${e.message}`)
+  } finally {
+    if (aId) await app.documents(uid).delete({ documentId: aId }).catch(() => {})
+    if (bId) await app.documents(uid).delete({ documentId: bId }).catch(() => {})
+  }
+}
+
 // --- fixture project -------------------------------------------------------
 
 async function cleanupLeftoverProject(app: any) {
@@ -220,6 +281,7 @@ async function probe1(app: any, project: any) {
       const te = await app.documents('api::timed-event.timed-event').create({
         data: {
           name: `Verify TE ${shapeName}`,
+          slug: `verify-te-${shapeName}`,
           startsAt,
           endsAt,
           project: shapeVal,
@@ -236,6 +298,28 @@ async function probe1(app: any, project: any) {
     } catch (e: any) {
       finding('probe1-timedevent-setup', `setup failed for shape "${shapeName}": ${e.message}`)
     }
+
+    // --- achievement: slug lifecycle (regex, in-project duplicate, self-update clean) ---
+    await checkSlugLifecycle(app, 'api::achievement.achievement', 'probe1-achievement-slug', shapeName, shapeVal, (name, slug) => ({
+      name,
+      slug,
+      eventType: 'lesson_completed',
+      targetCount: 1,
+    }))
+
+    // --- offer: slug lifecycle ---
+    await checkSlugLifecycle(app, 'api::offer.offer', 'probe1-offer-slug', shapeName, shapeVal, (name, slug) => ({
+      name,
+      slug,
+      headline: name,
+    }))
+
+    // --- timed-event: slug lifecycle (separate fixtures from the dates check above) ---
+    await checkSlugLifecycle(app, 'api::timed-event.timed-event', 'probe1-timedevent-slug', shapeName, shapeVal, (name, slug) => {
+      const s = new Date()
+      const e = new Date(s.getTime() + 3600_000)
+      return { name, slug, startsAt: s, endsAt: e }
+    })
   }
 
   for (const documentId of createdRewardIds) {
@@ -339,6 +423,7 @@ async function probe3(app: any, project: any, pg: Client) {
   const control = await app.documents('api::timed-event.timed-event').create({
     data: {
       name: 'Verify Probe3 Control (recurrence=none)',
+      slug: 'verify-probe3-control',
       startsAt,
       endsAt,
       recurrence: 'none',
@@ -357,6 +442,7 @@ async function probe3(app: any, project: any, pg: Client) {
   const positiveControl = await app.documents('api::timed-event.timed-event').create({
     data: {
       name: 'Verify Probe3 Positive Control (active)',
+      slug: 'verify-probe3-positive-control',
       startsAt: new Date(),
       endsAt: new Date(Date.now() + 3600_000),
       recurrence: 'none',
@@ -369,10 +455,10 @@ async function probe3(app: any, project: any, pg: Client) {
     const syntheticDocId = randomDocumentId()
     const insertRes = await pg.query(
       `INSERT INTO timed_events
-         (document_id, name, starts_at, ends_at, ending_soon_minutes, multiplier, enabled, recurrence, recurrence_ends_at, created_at, updated_at, published_at)
-       VALUES ($1, $2, $3, $4, 1440, 1, true, NULL, NULL, now(), now(), now())
+         (document_id, name, slug, starts_at, ends_at, ending_soon_minutes, multiplier, enabled, recurrence, recurrence_ends_at, created_at, updated_at, published_at)
+       VALUES ($1, $2, $3, $4, $5, 1440, 1, true, NULL, NULL, now(), now(), now())
        RETURNING id`,
-      [syntheticDocId, 'Verify Probe3 Legacy NULL Recurrence', startsAt.toISOString(), endsAt.toISOString()],
+      [syntheticDocId, 'Verify Probe3 Legacy NULL Recurrence', 'verify-probe3-legacy-null-recurrence', startsAt.toISOString(), endsAt.toISOString()],
     )
     syntheticId = insertRes.rows[0].id
     await pg.query('INSERT INTO timed_events_project_lnk (timed_event_id, project_id) VALUES ($1, $2)', [syntheticId, project.id])

@@ -22,6 +22,7 @@ export default {
     ctx.body = {
       achievements: rows.map((r: any) => ({
         id: r.documentId,
+        slug: r.slug,
         name: r.name,
         description: r.description ?? null,
         artworkUrl: r.artworkUrl ?? null,
@@ -44,6 +45,7 @@ export default {
         .filter((r: any) => r.placement?.slug)
         .map((r: any) => ({
           id: r.documentId,
+          slug: r.slug,
           placementSlug: r.placement.slug,
           headline: r.headline,
           body: r.body ?? null,
@@ -67,6 +69,7 @@ export default {
     ctx.body = {
       events: rows.map((r: any) => ({
         id: r.documentId,
+        slug: r.slug,
         name: r.name,
         description: r.description ?? null,
         startsAt: r.startsAt,
@@ -116,6 +119,7 @@ export default {
         .filter((r: any) => r.project?.documentId)
         .map((r: any) => ({
           id: r.documentId,
+          slug: r.slug,
           name: r.name,
           description: r.description ?? null,
           startsAt: r.startsAt,
