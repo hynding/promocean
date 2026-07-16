@@ -21,7 +21,10 @@ function configSecretOk(ctx: any): boolean {
 // depend only on content, not incidental DB history. Slug is unique per project per type, so
 // sorting by it is a total order.
 function sortBySlug<T extends { slug: string }>(rows: T[]): T[] {
-  return [...rows].sort((a, b) => a.slug.localeCompare(b.slug))
+  // Null-safe as defense in depth: callers are expected to have already gated out
+  // null/missing slugs (see exportProject's findings check), so this should never
+  // see one in practice, but a total, non-throwing compare costs nothing here.
+  return [...rows].sort((a, b) => (a.slug ?? '').localeCompare(b.slug ?? ''))
 }
 
 // Tolerant project-settings mappers (mirror exportProject's inline logic):
@@ -360,15 +363,6 @@ export default {
       }),
       strapi.documents('api::reward.reward').findMany({ filters: { project: { documentId: projectId } } }),
     ])
-    // Sorted by slug (see sortBySlug) so the export's array order is deterministic and
-    // content-derived, not an artifact of DB creation/id order — required for the file to be
-    // diff-stable across re-imports, reseeds, and different target projects.
-    const placements = sortBySlug(placementsRaw as Array<{ slug: string; [k: string]: any }>)
-    const achievements = sortBySlug(achievementsRaw as Array<{ slug: string; [k: string]: any }>)
-    const timedEvents = sortBySlug(timedEventsRaw as Array<{ slug: string; [k: string]: any }>)
-    const offers = sortBySlug(offersRaw as Array<{ slug: string; [k: string]: any }>)
-    const rewards = sortBySlug(rewardsRaw as Array<{ slug: string; [k: string]: any }>)
-
     // Every content type covered by the export must carry a non-empty slug —
     // the file format cross-references content by slug (offers -> placement/
     // timedEvent), so a row missing one would either silently break those
@@ -377,6 +371,12 @@ export default {
     // them all in one pass. An offer whose populated `placement` relation
     // itself has no resolvable slug is listed the same way — from the
     // export's perspective that offer can't be represented either.
+    //
+    // MUST run before sortBySlug: sortBySlug's compare calls slug.localeCompare
+    // unconditionally, which throws on a null/undefined slug. Legacy rows with
+    // slug === null (pre-existing data from before slugs were required at the
+    // schema level) are exactly the case this gate exists to catch and report
+    // as a clean 500 with findings — not crash the sort into a generic 500.
     const findings: string[] = []
     function offenderLine(type: string, row: any): string {
       return `${type} "${row.name}" (documentId ${row.documentId})`
@@ -384,17 +384,28 @@ export default {
     function hasSlug(row: any): boolean {
       return typeof row.slug === 'string' && row.slug.length > 0
     }
-    for (const row of placements) if (!hasSlug(row)) findings.push(offenderLine('placement', row))
-    for (const row of achievements) if (!hasSlug(row)) findings.push(offenderLine('achievement', row))
-    for (const row of timedEvents) if (!hasSlug(row)) findings.push(offenderLine('timed-event', row))
-    for (const row of offers) if (!hasSlug(row) || !hasSlug(row.placement ?? {})) findings.push(offenderLine('offer', row))
-    for (const row of rewards) if (!hasSlug(row)) findings.push(offenderLine('reward', row))
+    for (const row of placementsRaw) if (!hasSlug(row)) findings.push(offenderLine('placement', row))
+    for (const row of achievementsRaw) if (!hasSlug(row)) findings.push(offenderLine('achievement', row))
+    for (const row of timedEventsRaw) if (!hasSlug(row)) findings.push(offenderLine('timed-event', row))
+    for (const row of offersRaw as any[])
+      if (!hasSlug(row) || !hasSlug(row.placement ?? {})) findings.push(offenderLine('offer', row))
+    for (const row of rewardsRaw) if (!hasSlug(row)) findings.push(offenderLine('reward', row))
 
     if (findings.length > 0) {
       ctx.status = 500
       ctx.body = { error: 'unexported definitions missing slugs', findings }
       return
     }
+
+    // Sorted by slug (see sortBySlug) so the export's array order is deterministic and
+    // content-derived, not an artifact of DB creation/id order — required for the file to be
+    // diff-stable across re-imports, reseeds, and different target projects. Safe here: every
+    // row passed the findings gate above, so every slug is a non-null non-empty string.
+    const placements = sortBySlug(placementsRaw as Array<{ slug: string; [k: string]: any }>)
+    const achievements = sortBySlug(achievementsRaw as Array<{ slug: string; [k: string]: any }>)
+    const timedEvents = sortBySlug(timedEventsRaw as Array<{ slug: string; [k: string]: any }>)
+    const offers = sortBySlug(offersRaw as Array<{ slug: string; [k: string]: any }>)
+    const rewards = sortBySlug(rewardsRaw as Array<{ slug: string; [k: string]: any }>)
 
     const rawPointRules = project.pointRules
     let pointRules: Record<string, number>
