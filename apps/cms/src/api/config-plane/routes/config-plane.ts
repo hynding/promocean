@@ -9,6 +9,7 @@ export default {
     { method: 'GET', path: '/config-plane/projects/:projectId/event-types', handler: 'config-plane.eventTypes', config: { auth: false } },
     { method: 'GET', path: '/config-plane/projects/:projectId/point-rules', handler: 'config-plane.pointRules', config: { auth: false } },
     { method: 'GET', path: '/config-plane/projects/:projectId/export', handler: 'config-plane.exportProject', config: { auth: false } },
+    { method: 'POST', path: '/config-plane/projects/:projectId/import', handler: 'config-plane.importProject', config: { auth: false } },
     { method: 'POST', path: '/config-plane/verify-key', handler: 'config-plane.verifyKey', config: { auth: false } },
   ],
 }

@@ -63,6 +63,9 @@ importers:
 
   apps/cms:
     dependencies:
+      '@promocean/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@strapi/plugin-cloud':
         specifier: 5.50.0
         version: 5.50.0(01c9908993d0c7697cfcf765da1708e5)
