@@ -217,6 +217,149 @@ export default {
     }
     ctx.body = { pointRules }
   },
+  async exportProject(ctx: any) {
+    if (!configSecretOk(ctx)) return ctx.unauthorized()
+    const projectId = String(ctx.params.projectId ?? '')
+    if (!projectId) return ctx.badRequest('projectId is required')
+    const project = await strapi.documents('api::project.project').findOne({ documentId: projectId })
+    if (!project) return ctx.notFound()
+
+    const [placements, achievements, timedEvents, offers, rewards] = await Promise.all([
+      strapi.documents('api::placement.placement').findMany({ filters: { project: { documentId: projectId } } }),
+      strapi.documents('api::achievement.achievement').findMany({ filters: { project: { documentId: projectId } } }),
+      strapi.documents('api::timed-event.timed-event').findMany({ filters: { project: { documentId: projectId } } }),
+      strapi.documents('api::offer.offer').findMany({
+        filters: { project: { documentId: projectId } },
+        populate: ['placement', 'timedEvent'],
+      }),
+      strapi.documents('api::reward.reward').findMany({ filters: { project: { documentId: projectId } } }),
+    ])
+
+    // Every content type covered by the export must carry a non-empty slug —
+    // the file format cross-references content by slug (offers -> placement/
+    // timedEvent), so a row missing one would either silently break those
+    // refs or produce a file that fails configFileSchema. Collect EVERY
+    // offender rather than failing fast on the first, so an operator can fix
+    // them all in one pass. An offer whose populated `placement` relation
+    // itself has no resolvable slug is listed the same way — from the
+    // export's perspective that offer can't be represented either.
+    const findings: string[] = []
+    function offenderLine(type: string, row: any): string {
+      return `${type} "${row.name}" (documentId ${row.documentId})`
+    }
+    function hasSlug(row: any): boolean {
+      return typeof row.slug === 'string' && row.slug.length > 0
+    }
+    for (const row of placements) if (!hasSlug(row)) findings.push(offenderLine('placement', row))
+    for (const row of achievements) if (!hasSlug(row)) findings.push(offenderLine('achievement', row))
+    for (const row of timedEvents) if (!hasSlug(row)) findings.push(offenderLine('timed-event', row))
+    for (const row of offers) if (!hasSlug(row) || !hasSlug(row.placement ?? {})) findings.push(offenderLine('offer', row))
+    for (const row of rewards) if (!hasSlug(row)) findings.push(offenderLine('reward', row))
+
+    if (findings.length > 0) {
+      ctx.status = 500
+      ctx.body = { error: 'unexported definitions missing slugs', findings }
+      return
+    }
+
+    const rawPointRules = project.pointRules
+    let pointRules: Record<string, number>
+    if (rawPointRules == null) {
+      pointRules = {}
+    } else if (typeof rawPointRules === 'object' && !Array.isArray(rawPointRules)) {
+      pointRules = {}
+      for (const [key, value] of Object.entries(rawPointRules as Record<string, unknown>)) {
+        if (!EVENT_TYPE_PATTERN.test(key) || typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+          strapi.log.warn(`[promocean] project ${project.documentId} pointRules entry "${key}" is invalid; dropping`)
+          continue
+        }
+        pointRules[key] = value
+      }
+    } else {
+      strapi.log.warn(`[promocean] project ${project.documentId} pointRules is not an object; ignoring`)
+      pointRules = {}
+    }
+
+    const rawEventTypes = project.registeredEventTypes
+    let registeredEventTypes: string[]
+    if (Array.isArray(rawEventTypes)) {
+      registeredEventTypes = rawEventTypes.filter((t: unknown): t is string => typeof t === 'string' && EVENT_TYPE_PATTERN.test(t))
+    } else if (rawEventTypes == null) {
+      registeredEventTypes = []
+    } else {
+      strapi.log.warn(`[promocean] project ${project.documentId} registeredEventTypes is not an array; ignoring`)
+      registeredEventTypes = []
+    }
+
+    const rawOrigins = project.allowedOrigins
+    let allowedOrigins: string[] | null
+    if (Array.isArray(rawOrigins) && rawOrigins.every((o: unknown) => typeof o === 'string')) {
+      allowedOrigins = rawOrigins
+    } else if (rawOrigins == null) {
+      allowedOrigins = null
+    } else {
+      strapi.log.warn(`[promocean] project ${project.documentId} allowedOrigins is not a string array; ignoring`)
+      allowedOrigins = null
+    }
+
+    ctx.body = {
+      formatVersion: 1,
+      project: { pointRules, registeredEventTypes, allowedOrigins },
+      placements: placements.map((r: any) => ({
+        slug: r.slug,
+        name: r.name,
+      })),
+      achievements: achievements.map((r: any) => ({
+        slug: r.slug,
+        name: r.name,
+        description: r.description ?? null,
+        artworkUrl: r.artworkUrl ?? null,
+        eventType: r.eventType,
+        targetCount: r.targetCount,
+        pointsValue: r.pointsValue ?? 0,
+      })),
+      timedEvents: timedEvents.map((r: any) => ({
+        slug: r.slug,
+        name: r.name,
+        description: r.description ?? null,
+        startsAt: r.startsAt,
+        endsAt: r.endsAt,
+        endingSoonMinutes: r.endingSoonMinutes,
+        multiplier: r.multiplier,
+        recurrence: r.recurrence ?? 'none',
+        recurrenceEndsAt: r.recurrenceEndsAt ?? null,
+        enabled: r.enabled,
+      })),
+      offers: offers.map((r: any) => ({
+        slug: r.slug,
+        name: r.name,
+        headline: r.headline,
+        body: r.body ?? null,
+        imageUrl: r.imageUrl ?? null,
+        ctaText: r.ctaText ?? null,
+        ctaUrl: r.ctaUrl ?? null,
+        startsAt: r.startsAt ?? null,
+        endsAt: r.endsAt ?? null,
+        priority: r.priority ?? 0,
+        placement: r.placement.slug,
+        timedEvent: r.timedEvent?.slug ?? null,
+      })),
+      rewards: rewards.map((r: any) => ({
+        slug: r.slug,
+        name: r.name,
+        description: r.description ?? null,
+        codeType: r.codeType,
+        staticCode: r.staticCode ?? null,
+        codePrefix: r.codePrefix ?? null,
+        pointsPrice: r.pointsPrice ?? 0,
+        startsAt: r.startsAt ?? null,
+        endsAt: r.endsAt ?? null,
+        perUserLimit: r.perUserLimit ?? 1,
+        inventory: r.inventory ?? null,
+        enabled: r.enabled,
+      })),
+    }
+  },
   async verifyKey(ctx: any) {
     if (!configSecretOk(ctx)) return ctx.unauthorized()
     const { keyHash } = ctx.request.body ?? {}
