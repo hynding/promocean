@@ -26,6 +26,10 @@ import {
   recurrenceSchema,
   liveTimedEventSchema,
   backfillResponseSchema,
+  configSlugSchema,
+  configFileSchema,
+  importRequestSchema,
+  importResponseSchema,
 } from '../src/index.js'
 
 describe('trackEventRequestSchema', () => {
@@ -602,6 +606,195 @@ describe('backfillResponseSchema', () => {
     for (const key of Object.keys(valid)) {
       const payload = { ...valid, [key]: -1 }
       expect(backfillResponseSchema.safeParse(payload).success).toBe(false)
+    }
+  })
+})
+
+describe('configSlugSchema', () => {
+  it('accepts lowercase, digits, hyphen and underscore (not leading)', () => {
+    for (const slug of ['homepage', 'home2', 'home-page', 'home_page', 'a']) {
+      expect(configSlugSchema.safeParse(slug).success).toBe(true)
+    }
+  })
+  it('rejects a leading digit', () => {
+    expect(configSlugSchema.safeParse('1homepage').success).toBe(false)
+  })
+  it('rejects uppercase letters', () => {
+    expect(configSlugSchema.safeParse('Homepage').success).toBe(false)
+  })
+  it('rejects a leading hyphen or underscore', () => {
+    expect(configSlugSchema.safeParse('-homepage').success).toBe(false)
+    expect(configSlugSchema.safeParse('_homepage').success).toBe(false)
+  })
+  it('rejects an empty string', () => {
+    expect(configSlugSchema.safeParse('').success).toBe(false)
+  })
+})
+
+describe('configFileSchema', () => {
+  const baseFile = {
+    formatVersion: 1 as const,
+    project: {
+      pointRules: { click: 1, purchase: 10 },
+      registeredEventTypes: ['click', 'purchase'],
+      allowedOrigins: ['https://example.com'],
+    },
+    placements: [{ slug: 'homepage', name: 'Homepage' }],
+    achievements: [{
+      slug: 'first-purchase', name: 'First Purchase', description: 'Make your first purchase',
+      artworkUrl: 'https://cdn.example.com/a.png', eventType: 'purchase',
+      targetCount: 1, pointsValue: 100,
+    }],
+    timedEvents: [{
+      slug: 'double_points', name: 'Double Points', description: 'Double points weekend',
+      startsAt: '2026-07-08T00:00:00.000Z', endsAt: '2026-07-09T00:00:00.000Z',
+      endingSoonMinutes: 30, multiplier: 2,
+      recurrence: 'weekly' as const,
+      recurrenceEndsAt: '2026-12-31T00:00:00.000Z', enabled: true,
+    }],
+    offers: [{
+      slug: 'summer-sale', name: 'Summer Sale', headline: 'Save big',
+      body: 'Limited time offer', imageUrl: 'https://cdn.example.com/o.png',
+      ctaText: 'Shop now', ctaUrl: 'https://example.com/shop',
+      startsAt: '2026-07-01T00:00:00.000Z', endsAt: '2026-07-31T00:00:00.000Z',
+      priority: 1, placement: 'homepage',
+      timedEvent: 'double_points',
+    }],
+    rewards: [{
+      slug: 'free-shipping', name: 'Free Shipping', description: 'Free shipping on next order',
+      codeType: 'static' as const, staticCode: 'SHIP2026',
+      codePrefix: 'SHIP', pointsPrice: 500,
+      startsAt: '2026-07-01T00:00:00.000Z', endsAt: '2026-07-31T00:00:00.000Z',
+      perUserLimit: 1, inventory: 100,
+      enabled: true,
+    }],
+  }
+
+  it('round-trips a full valid config file with every nullable field set (non-null)', () => {
+    expect(configFileSchema.parse(baseFile)).toEqual(baseFile)
+  })
+
+  it('round-trips a full valid config file with every nullable field set to null', () => {
+    const nulledFile = {
+      ...baseFile,
+      project: { ...baseFile.project, allowedOrigins: null },
+      achievements: [{ ...baseFile.achievements[0], description: null, artworkUrl: null }],
+      timedEvents: [{ ...baseFile.timedEvents[0], description: null, recurrenceEndsAt: null }],
+      offers: [{
+        ...baseFile.offers[0],
+        body: null, imageUrl: null, ctaText: null, ctaUrl: null,
+        startsAt: null, endsAt: null, timedEvent: null,
+      }],
+      rewards: [{
+        ...baseFile.rewards[0],
+        description: null, staticCode: null, codePrefix: null, startsAt: null, endsAt: null, inventory: null,
+      }],
+    }
+    expect(configFileSchema.parse(nulledFile)).toEqual(nulledFile)
+  })
+
+  it('accepts an offer with timedEvent: null', () => {
+    const file = {
+      ...baseFile,
+      offers: [{ ...baseFile.offers[0], timedEvent: null }],
+    }
+    expect(configFileSchema.safeParse(file).success).toBe(true)
+  })
+
+  it('rejects formatVersion: 2', () => {
+    const file = { ...baseFile, formatVersion: 2 }
+    expect(configFileSchema.safeParse(file).success).toBe(false)
+  })
+
+  it('rejects a pointRules key that is not a valid event type', () => {
+    const file = { ...baseFile, project: { ...baseFile.project, pointRules: { 'Bad-Key': 1 } } }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a registeredEventTypes entry that is not a valid event type', () => {
+    const file = { ...baseFile, project: { ...baseFile.project, registeredEventTypes: ['ok_type', 'Bad Type'] } }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a duplicate slug within placements, naming the type and slug', () => {
+    const file = {
+      ...baseFile,
+      placements: [{ slug: 'homepage', name: 'Homepage' }, { slug: 'homepage', name: 'Homepage Again' }],
+    }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message).join(' ')
+      expect(messages).toContain('duplicate slug')
+      expect(messages).toContain('homepage')
+      expect(messages).toContain('placements')
+    }
+  })
+
+  it('rejects a duplicate slug within rewards', () => {
+    const file = {
+      ...baseFile,
+      rewards: [baseFile.rewards[0], { ...baseFile.rewards[0], name: 'Dup' }],
+    }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('importRequestSchema', () => {
+  const file = {
+    formatVersion: 1 as const,
+    project: { pointRules: {}, registeredEventTypes: [], allowedOrigins: null },
+    placements: [],
+    achievements: [],
+    timedEvents: [],
+    offers: [],
+    rewards: [],
+  }
+
+  it('defaults prune and dryRun to false when omitted', () => {
+    const result = importRequestSchema.parse({ file })
+    expect(result.prune).toBe(false)
+    expect(result.dryRun).toBe(false)
+  })
+
+  it('round-trips explicit prune and dryRun values', () => {
+    const result = importRequestSchema.parse({ file, prune: true, dryRun: true })
+    expect(result.prune).toBe(true)
+    expect(result.dryRun).toBe(true)
+  })
+})
+
+describe('importResponseSchema', () => {
+  const typePlan = { creates: [], updates: [], deletes: [], unchanged: 0 }
+  const plan = {
+    project: typePlan, placements: typePlan, achievements: typePlan,
+    timedEvents: typePlan, offers: typePlan, rewards: typePlan,
+  }
+
+  it('parses a response without an error field', () => {
+    const payload = { applied: true, plan }
+    expect(importResponseSchema.parse(payload)).toEqual(payload)
+  })
+
+  it('parses a response with an error field', () => {
+    const payload = {
+      applied: false,
+      plan,
+      error: { stage: 'validation', message: 'formatVersion must be 1' },
+    }
+    expect(importResponseSchema.parse(payload)).toEqual(payload)
+  })
+
+  it('rejects a negative unchanged count in any plan bucket', () => {
+    for (const key of Object.keys(plan)) {
+      const payload = {
+        applied: true,
+        plan: { ...plan, [key]: { ...typePlan, unchanged: -1 } },
+      }
+      expect(importResponseSchema.safeParse(payload).success).toBe(false)
     }
   })
 })

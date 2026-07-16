@@ -38,6 +38,11 @@ jobs:
       # complexity for 3 small alpine images. Revisit if build time grows.
       - run: docker compose --profile stack build
       - run: docker compose --profile stack up -d --wait
+      # config-sync.spec.ts execFiles packages/cli/dist/cli.js and imports
+      # @promocean/contracts's dist — neither is produced by the docker build
+      # above (that builds the stack images, not the host workspace). Build the
+      # CLI here (turbo pulls in @promocean/contracts as a dependency).
+      - run: pnpm turbo run build --filter=@promocean/cli
       - run: pnpm --filter demo exec playwright install --with-deps chromium
       - run: pnpm --filter demo e2e
       - if: failure()

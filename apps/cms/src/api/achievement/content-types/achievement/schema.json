@@ -5,6 +5,7 @@
   "options": { "draftAndPublish": false },
   "attributes": {
     "name": { "type": "string", "required": true },
+    "slug": { "type": "string", "required": true, "regex": "^[a-z][a-z0-9_-]*$" },
     "description": { "type": "text" },
     "artworkUrl": { "type": "string" },
     "eventType": { "type": "string", "required": true, "regex": "^[a-z][a-z0-9_]*$" },

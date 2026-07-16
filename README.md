@@ -190,8 +190,15 @@ coupons; `campaign-lifecycle.spec.ts` proves the seeded recurring `Weekly
 Happy Hour` event reports a consistent `recurrence`/`nextOccurrenceStartsAt`
 on the live feed and renders in the countdown widget, and that retroactive
 achievement backfill is idempotent after a live unlock (both via a direct
-API call and the `/stats` page's operator-facing backfill form). With cms +
-api already running (per above):
+API call and the `/stats` page's operator-facing backfill form);
+`config-sync.spec.ts` drives `@promocean/cli` as a real subprocess against
+the running stack — export the seeded project, a scripted edit (raise
+`first_lesson`'s `pointsValue`, add a new achievement), a `--dry-run` plan
+check (exit code 2, exactly the expected creates/updates), an apply (exit
+0), polling `/v1/users/:userId/achievements` and `/v1/users/:userId/wallet`
+until the change is visible through the api's config-plane cache (see
+"Config as code" above), and a final re-import proving the file and server
+now agree (`--dry-run` exits 0). With cms + api already running (per above):
 
     pnpm --filter demo exec playwright install chromium
     pnpm --filter demo e2e
@@ -408,6 +415,71 @@ code via validate/redeem). This is deliberate: the catalog is safe to expose
 to a publishable key/browser context without leaking a shared promo code to
 anyone who hasn't earned it.
 
+## Config as code
+
+`@promocean/cli` (`npm i -g @promocean/cli`, MIT) exports a project's whole
+configuration — project settings (`pointRules`, `registeredEventTypes`,
+`allowedOrigins`), placements, achievements, timed events, offers, and
+rewards — to a single JSON file, and imports one back with a
+plan-before-apply workflow. This is the operator-facing alternative to
+hand-editing content in the Strapi admin: put the file under version
+control, review changes as a diff, and apply them the same way in every
+environment.
+
+**Authoring loop:**
+
+    promocean export --url https://cms.example.com --project <projectId> --out config.json
+    # edit config.json by hand (or with tooling) ...
+    promocean import --url https://cms.example.com --project <projectId> --file config.json --dry-run
+    # inspect the printed plan, then apply for real:
+    promocean import --url https://cms.example.com --project <projectId> --file config.json
+
+Both commands read the config-plane secret from the `PROMOCEAN_CONFIG_SECRET`
+environment variable only (never a flag), matching the `x-config-secret`
+header the config-plane endpoints require — the same operator-only trust
+model as every other config-plane read. Content is matched between the file
+and the server **by slug** (achievements, timed events, offers, rewards,
+and placements each carry a required, project-unique `slug`), not by
+internal id — a file authored against one project imports cleanly into any
+other project with the same slugs, which is what makes the format portable
+across environments/instances (see the runtime-history caveat below for the
+one place this portability doesn't fully extend).
+
+**CI drift check via exit code 2:** `import --dry-run` exits `0` when the
+computed plan has no creates/updates/deletes anywhere (the file already
+matches the server), `2` when it would change something, and `1` on any
+error (bad file, HTTP failure, or a partially-applied 422). A CI job that
+runs `promocean import --dry-run` against your checked-in config file and
+fails the build on a non-zero exit catches config drift — someone edited
+content directly in the CMS admin instead of through the file — before it
+silently diverges further; exit `2` specifically means "the file and the
+server disagree," which is exactly the drift signal such a job wants to
+gate on (as opposed to exit `1`, which means the check itself couldn't run).
+
+**Prune semantics:** by default, import only creates and updates — content
+that exists on the server but is absent from the file is left alone. Pass
+`--prune` to additionally delete server-side content (per content type) that
+the file doesn't mention. Without `--prune`, deleting a row from your config
+file is a no-op on the next import; with it, deleting a row from the file
+deletes that row on the server. When `--prune` is used, an import is rejected
+upfront (HTTP 400, before any write) if a kept offer references a placement or
+timed event that the file omits — because that target would be deleted by the
+prune, orphaning the offer.
+
+**Runtime-history caveat:** import matches existing content by slug and
+updates it *in place* when the file's fields differ — this preserves the
+underlying documentId, so anything keyed off it (analytics rows, wallet
+ledger `sourceRef`s, delivered-webhook state, achievement unlock history)
+stays attached to the same logical achievement/offer/reward/timed-event
+across edits. Deleting a row from the file (with `--prune`) and re-adding it
+later under the same slug is a **delete + recreate**, not an update — the
+new row gets a brand-new documentId, so continuity with anything that
+referenced the old one is **not** promised. Prefer editing a row in place
+over delete-then-recreate whenever preserving that history matters.
+
+See `packages/cli/README.md` for the full command reference (flags, exit
+codes, 422 rendering, programmatic use).
+
 ## Webhooks
 
 The api dispatches signed `POST` webhooks for `timed_event.live` /
@@ -467,7 +539,7 @@ Scheduler tuning (all optional, read once at process start):
 
 ## Publishing
 
-MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`) publish via a two-step manual flow:
+MIT packages (`@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`, `@promocean/cli`) publish via a two-step manual flow:
 
 1. **Describe the change**: Run `pnpm changeset` to create a `.changeset/*.md` file (describes the change type and affected packages). Commit this file with your PR.
 

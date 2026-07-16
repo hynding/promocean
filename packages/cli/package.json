@@ -1,0 +1,32 @@
+{
+  "name": "@promocean/cli",
+  "version": "0.0.1",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "promocean": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@promocean/contracts": "workspace:*",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@promocean/config": "workspace:*",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.0"
+  }
+}

@@ -15,10 +15,12 @@
     "typecheck": "tsc --noEmit",
     "test": "echo ok",
     "verify:lifecycles": "tsx scripts/verify-lifecycles.ts",
+    "verify:config-sync": "tsx scripts/verify-config-sync.ts",
     "upgrade": "npx @strapi/upgrade latest",
     "upgrade:dry": "npx @strapi/upgrade latest --dry"
   },
   "dependencies": {
+    "@promocean/contracts": "workspace:*",
     "@strapi/plugin-cloud": "5.50.0",
     "@strapi/plugin-users-permissions": "5.50.0",
     "@strapi/strapi": "5.50.0",
@@ -38,7 +40,7 @@
     "typescript": "^5"
   },
   "engines": {
-    "node": ">=20.0.0 <=26.x.x",
+    "node": ">=20.19.0 <=26.x.x",
     "npm": ">=6.0.0"
   },
   "strapi": {
