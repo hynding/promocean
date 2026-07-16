@@ -461,7 +461,10 @@ that exists on the server but is absent from the file is left alone. Pass
 `--prune` to additionally delete server-side content (per content type) that
 the file doesn't mention. Without `--prune`, deleting a row from your config
 file is a no-op on the next import; with it, deleting a row from the file
-deletes that row on the server.
+deletes that row on the server. When `--prune` is used, an import is rejected
+upfront (HTTP 400, before any write) if a kept offer references a placement or
+timed event that the file omits — because that target would be deleted by the
+prune, orphaning the offer.
 
 **Runtime-history caveat:** import matches existing content by slug and
 updates it *in place* when the file's fields differ — this preserves the

@@ -44,7 +44,10 @@ is given — applies it.
     promocean import --url https://cms.example.com --project <projectId> --file project.json [--prune] [--dry-run]
 
 - `--prune`: delete content that exists on the server but is absent from the
-  file (per content type). Without it, absent content is left alone.
+  file (per content type). Without it, absent content is left alone. When used,
+  an import is rejected upfront (HTTP 400, before any write) if a kept offer
+  references a placement or timed event that the file omits, since that target
+  would be deleted by the prune, orphaning the offer.
 - `--dry-run`: compute and print the plan without applying it.
 
 The plan is printed as a table: per content type, counts of creates/updates/
