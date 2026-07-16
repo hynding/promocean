@@ -1,12 +1,13 @@
 # Releasing
 
-The publishable packages are the three MIT-licensed ones (see `LICENSING.md`):
+The publishable packages are the four MIT-licensed ones (see `LICENSING.md`):
 
 | Package | Publish? |
 |---|---|
 | `@promocean/contracts` | yes (npm) |
 | `@promocean/sdk` | yes (npm) |
 | `@promocean/widgets` | yes (npm) |
+| `@promocean/cli` | yes (npm) — ships a `promocean` binary, not a library; same publish path |
 | `@promocean/core`, `@promocean/adapter-db`, `@promocean/adapter-strapi`, `@promocean/config`, `api`, `cms`, `demo` | no — `"private": true` in their `package.json` |
 
 Versioning is driven by [Changesets](https://github.com/changesets/changesets).
@@ -48,17 +49,20 @@ pnpm publish -r --dry-run --no-git-checks
 ```
 
 For each of `@promocean/contracts`, `@promocean/sdk`, `@promocean/widgets`,
-check the printed tarball contents:
+`@promocean/cli`, check the printed tarball contents:
 
 - [ ] `dist/` present; `src/` and `test/` **absent** (the `files` allowlist is
-      `["dist", "README.md", "LICENSE"]`)
+      `["dist", "README.md", "LICENSE"]` — `@promocean/cli`'s is the same set,
+      listed as `["dist", "LICENSE", "README.md"]`)
 - [ ] `LICENSE` (MIT) and `README.md` present
 - [ ] version matches the `changeset version` bump
+- [ ] for `@promocean/cli` only: `dist/cli.js` keeps its `#!/usr/bin/env node`
+      shebang and `bin.promocean` in the packed manifest points at it
 
 Then inspect the packed manifests directly (dry-run output doesn't show them):
 
 ```sh
-pnpm --filter @promocean/contracts --filter @promocean/sdk --filter @promocean/widgets exec \
+pnpm --filter @promocean/contracts --filter @promocean/sdk --filter @promocean/widgets --filter @promocean/cli exec \
   pnpm pack --pack-destination /tmp/promocean-pack
 for f in /tmp/promocean-pack/*.tgz; do tar -xOzf "$f" package/package.json; done
 ```
@@ -103,7 +107,7 @@ TOKEN=$(curl -fsS -XPUT http://localhost:4873/-/user/org.couchdb.user:rehearsal 
 npm config set //localhost:4873/:_authToken "$TOKEN"
 npm whoami --registry http://localhost:4873   # -> rehearsal
 
-pnpm --filter @promocean/contracts --filter @promocean/sdk --filter @promocean/widgets \
+pnpm --filter @promocean/contracts --filter @promocean/sdk --filter @promocean/widgets --filter @promocean/cli \
   publish --registry http://localhost:4873 --no-git-checks
 ```
 
@@ -123,9 +127,17 @@ npm init -y
 npm install @promocean/contracts @promocean/sdk @promocean/widgets react react-dom \
   --registry http://localhost:4873
 node smoke.mjs   # see below
+
+# @promocean/cli ships a binary, not a library — its own smoke check is
+# installing it globally and confirming the bin resolves and runs:
+npm install -g @promocean/cli --registry http://localhost:4873
+promocean export --url http://localhost:1 --project x 2>&1 | grep -q PROMOCEAN_CONFIG_SECRET \
+  && echo 'cli bin OK (env-guard message printed)'
+npm uninstall -g @promocean/cli
 ```
 
-`smoke.mjs` must exercise all three packages:
+`smoke.mjs` must exercise all three library packages (`@promocean/cli` is
+smoke-tested separately above, as a binary rather than an import):
 
 - parse one `@promocean/contracts` schema (e.g. `rewardSchema.parse({...})`)
 - `new Promocean({ publishableKey, baseUrl, fetchImpl: mockFetch })` and

@@ -50,10 +50,16 @@ COPY --from=prod-deps --chown=node:node /app .
 #  - public/         static assets + local upload provider target
 #  - database/       app-level migrations dir (appDir/database/migrations)
 #  - favicon.png     strapi::favicon middleware resolves it at appDir root
+#  - packages/contracts/dist  the config-plane controller's runtime `require('@promocean/contracts')`
+#    (Sprint 11) — prod-deps only installs from out/json (package.json skeletons, no
+#    built output), so without this copy the workspace symlink resolves to a
+#    dist-less package and Strapi fails to boot (matches apps/api/Dockerfile's
+#    existing pattern for its own workspace deps).
 COPY --from=installer --chown=node:node /app/apps/cms/dist ./apps/cms/dist
 COPY --from=installer --chown=node:node /app/apps/cms/public ./apps/cms/public
 COPY --from=installer --chown=node:node /app/apps/cms/database ./apps/cms/database
 COPY --from=installer --chown=node:node /app/apps/cms/tsconfig.json /app/apps/cms/favicon.png ./apps/cms/
+COPY --from=installer --chown=node:node /app/packages/contracts/dist ./packages/contracts/dist
 USER node
 EXPOSE 1337
 # Strapi exposes /_health returning 204 with no auth — perfect for a probe.

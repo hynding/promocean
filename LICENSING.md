@@ -1,10 +1,11 @@
 # Licensing
 
-Embeddable client code (the SDK, widgets, shared schemas, and shared tooling
-config) ships MIT so integrators can adopt it in their own codebases without a
-copyleft obligation; everything that makes up the Promocean platform itself
-(the CMS, the runtime API, the demo app, and the core/domain and adapter
-packages behind them) stays GPL-3.0-only for the open-core angle.
+Embeddable client code (the SDK, widgets, shared schemas, the config-as-code
+CLI, and shared tooling config) ships MIT so integrators can adopt it in
+their own codebases without a copyleft obligation; everything that makes up
+the Promocean platform itself (the CMS, the runtime API, the demo app, and
+the core/domain and adapter packages behind them) stays GPL-3.0-only for the
+open-core angle.
 
 | Package                     | License      |
 | ---------------------------- | ------------ |
@@ -18,6 +19,7 @@ packages behind them) stays GPL-3.0-only for the open-core angle.
 | `packages/contracts`          | MIT          |
 | `packages/sdk`                | MIT          |
 | `packages/widgets`            | MIT          |
+| `packages/cli`                | MIT          |
 | `packages/config`             | MIT          |
 
 Each MIT package carries its own `LICENSE` file; the root `LICENSE` covers

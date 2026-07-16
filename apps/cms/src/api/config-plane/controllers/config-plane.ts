@@ -13,6 +13,17 @@ function configSecretOk(ctx: any): boolean {
   return provided.length === expectedBuf.length && timingSafeEqual(provided, expectedBuf)
 }
 
+// exportProject's own output ordering, independent of whatever order findMany happens to
+// return rows in (DB id-assignment order, which isn't guaranteed to match input file order
+// for content created via import — e.g. concurrent creates — nor guaranteed stable across
+// reseeds of the same seed script). Config files are meant to be diffed/version-controlled
+// and re-imported into other projects, so export's array order must be deterministic and
+// depend only on content, not incidental DB history. Slug is unique per project per type, so
+// sorting by it is a total order.
+function sortBySlug<T extends { slug: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => a.slug.localeCompare(b.slug))
+}
+
 // Tolerant project-settings mappers (mirror exportProject's inline logic):
 // coerce whatever is stored in the JSON columns into the file's shape,
 // dropping malformed entries rather than surfacing them.
@@ -339,7 +350,7 @@ export default {
     const project = await strapi.documents('api::project.project').findOne({ documentId: projectId })
     if (!project) return ctx.notFound()
 
-    const [placements, achievements, timedEvents, offers, rewards] = await Promise.all([
+    const [placementsRaw, achievementsRaw, timedEventsRaw, offersRaw, rewardsRaw] = await Promise.all([
       strapi.documents('api::placement.placement').findMany({ filters: { project: { documentId: projectId } } }),
       strapi.documents('api::achievement.achievement').findMany({ filters: { project: { documentId: projectId } } }),
       strapi.documents('api::timed-event.timed-event').findMany({ filters: { project: { documentId: projectId } } }),
@@ -349,6 +360,14 @@ export default {
       }),
       strapi.documents('api::reward.reward').findMany({ filters: { project: { documentId: projectId } } }),
     ])
+    // Sorted by slug (see sortBySlug) so the export's array order is deterministic and
+    // content-derived, not an artifact of DB creation/id order — required for the file to be
+    // diff-stable across re-imports, reseeds, and different target projects.
+    const placements = sortBySlug(placementsRaw as Array<{ slug: string; [k: string]: any }>)
+    const achievements = sortBySlug(achievementsRaw as Array<{ slug: string; [k: string]: any }>)
+    const timedEvents = sortBySlug(timedEventsRaw as Array<{ slug: string; [k: string]: any }>)
+    const offers = sortBySlug(offersRaw as Array<{ slug: string; [k: string]: any }>)
+    const rewards = sortBySlug(rewardsRaw as Array<{ slug: string; [k: string]: any }>)
 
     // Every content type covered by the export must carry a non-empty slug —
     // the file format cross-references content by slug (offers -> placement/

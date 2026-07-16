@@ -50,6 +50,23 @@ is given — applies it.
 The plan is printed as a table: per content type, counts of creates/updates/
 deletes/unchanged, plus the slugs affected.
 
+Content is matched between the file and the server **by slug**, not by
+internal id. Updating a matched row in place preserves its underlying id
+(and anything keyed off it, e.g. wallet ledger references to an
+achievement); deleting a row (via `--prune`) and later re-adding it under
+the same slug creates a brand-new row with a new id — see the root
+README's "Config as code" section for the full runtime-history caveat.
+
+## CI usage (drift check)
+
+`import --dry-run`'s exit code is the drift signal: `0` means the checked-in
+file already matches the server, `2` means it wouldn't (someone changed
+content another way, e.g. directly in the CMS admin), `1` means the check
+itself failed to run. A CI job that runs this on every push/PR and fails the
+build on a non-zero exit catches drift before it compounds:
+
+    PROMOCEAN_CONFIG_SECRET=... promocean import --url https://cms.example.com --project <projectId> --file config.json --dry-run
+
 ## Exit codes
 
 | Code | Meaning |
