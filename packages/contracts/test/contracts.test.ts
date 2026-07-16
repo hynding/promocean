@@ -687,7 +687,7 @@ describe('configFileSchema', () => {
       }],
       rewards: [{
         ...baseFile.rewards[0],
-        description: null, staticCode: null, codePrefix: null, inventory: null,
+        description: null, staticCode: null, codePrefix: null, startsAt: null, endsAt: null, inventory: null,
       }],
     }
     expect(configFileSchema.parse(nulledFile)).toEqual(nulledFile)
