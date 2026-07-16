@@ -552,7 +552,7 @@ export default {
     const { state, ids, projectSlug } = loaded
 
     // 3. Cross-ref resolution -> 400 BEFORE any write.
-    const unknownRefs = findUnknownRefs(file, state)
+    const unknownRefs = findUnknownRefs(file, state, prune)
     if (unknownRefs.length > 0) {
       ctx.status = 400
       ctx.body = { error: 'unknown reference', details: unknownRefs }
@@ -732,8 +732,15 @@ export default {
       // Recompute the ACTUALLY-applied plan by re-querying and re-diffing —
       // never report the intended plan. Fully-applied types collapse to
       // unchanged; the failing/not-yet-reached ones remain in their buckets.
-      const after = await loadCurrentState(projectId)
-      const recomputed = after ? computePlan(file, after.state, after.projectSlug, prune) : plan
+      // If the recompute itself throws (re-query/diff failure), fall back to the
+      // intended plan rather than let it mask the real 422 as a generic 500.
+      let recomputed = plan
+      try {
+        const after = await loadCurrentState(projectId)
+        if (after) recomputed = computePlan(file, after.state, after.projectSlug, prune)
+      } catch {
+        recomputed = plan
+      }
       ctx.status = 422
       ctx.body = {
         applied: true,

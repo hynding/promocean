@@ -204,19 +204,22 @@ export function computePlan(
   }
 }
 
-// Every offer.placement must resolve against (existing ∪ file-created)
-// placement slugs, and every non-null offer.timedEvent against (existing ∪
-// file-created) timed-event slugs. Anything unresolved is a hard 400 BEFORE any
-// write. Collect every violation (not fail-fast) so an operator sees them all.
-export function findUnknownRefs(file: ConfigFile, current: CurrentState): UnknownRef[] {
-  const placementSlugs = new Set<string>([
-    ...current.placements.map((p) => p.slug),
-    ...file.placements.map((p) => p.slug),
-  ])
-  const timedEventSlugs = new Set<string>([
-    ...current.timedEvents.map((t) => t.slug),
-    ...file.timedEvents.map((t) => t.slug),
-  ])
+// Every offer.placement must resolve against the set of placement slugs that will
+// EXIST after the import, and every non-null offer.timedEvent against the surviving
+// timed-event slugs. Anything unresolved is a hard 400 BEFORE any write. Collect
+// every violation (not fail-fast) so an operator sees them all.
+//
+// The valid set depends on prune: without it, existing rows survive, so the target
+// is (existing ∪ file). WITH prune, any existing target absent from the file is
+// about to be deleted — a surviving file offer pointing at it would be orphaned and
+// the project left unexportable — so the target must be FILE slugs only.
+export function findUnknownRefs(file: ConfigFile, current: CurrentState, prune: boolean): UnknownRef[] {
+  const placementSlugs = prune
+    ? new Set<string>(file.placements.map((p) => p.slug))
+    : new Set<string>([...current.placements.map((p) => p.slug), ...file.placements.map((p) => p.slug)])
+  const timedEventSlugs = prune
+    ? new Set<string>(file.timedEvents.map((t) => t.slug))
+    : new Set<string>([...current.timedEvents.map((t) => t.slug), ...file.timedEvents.map((t) => t.slug)])
   const out: UnknownRef[] = []
   for (const o of file.offers) {
     if (!placementSlugs.has(o.placement)) {

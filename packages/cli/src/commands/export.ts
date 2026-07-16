@@ -1,5 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { configFileSchema } from '@promocean/contracts'
+import { readBody, renderErrorBody } from '../http.js'
 import type { CommandResult } from '../types.js'
 
 export interface ExportOptions {
@@ -20,10 +21,10 @@ export async function runExport(opts: ExportOptions): Promise<CommandResult> {
   const fetchImpl = opts.fetchImpl ?? fetch
   const url = `${opts.url}/api/config-plane/projects/${encodeURIComponent(opts.project)}/export`
   const res = await fetchImpl(url, { headers: { 'x-config-secret': secret } })
-  const body: unknown = await res.json().catch(() => null)
+  const { json: body, text } = await readBody(res)
 
   if (!res.ok) {
-    return { exitCode: 1, output: `Error: export request failed (HTTP ${res.status}): ${JSON.stringify(body)}` }
+    return { exitCode: 1, output: `Error: export request failed (HTTP ${res.status}): ${renderErrorBody(body, text)}` }
   }
 
   // Defense against a drifted server: validate the response before writing anything.

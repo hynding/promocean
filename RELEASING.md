@@ -69,7 +69,10 @@ for f in /tmp/promocean-pack/*.tgz; do tar -xOzf "$f" package/package.json; done
 
 - [ ] every `workspace:*` dep is rewritten to a real version
       (e.g. `"@promocean/contracts": "0.1.0"`)
-- [ ] `main`/`types` point into `dist/`
+- [ ] `main`/`types` point into `dist/` — **except `@promocean/cli`**, which is a
+      bin-only package (no library entry point) and by design declares neither;
+      for it, verify `bin.promocean` points into `dist/` instead (see the shebang
+      check above)
 
 Note: `@promocean/core`, `@promocean/adapter-db`, `@promocean/adapter-strapi`,
 `@promocean/config`, and `api` are all `"private": true`, so `pnpm publish -r`

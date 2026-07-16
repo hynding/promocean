@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { parseArgs, UsageError } from './args.js'
 import { runExport } from './commands/export.js'
 import { runImport } from './commands/import.js'
@@ -36,7 +38,13 @@ export async function run(argv: string[]): Promise<number> {
   return result.exitCode
 }
 
-const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`
+// Node realpath-resolves the ESM main module before setting import.meta.url, but
+// leaves process.argv[1] as the invoked path (an npm bin symlink, or a path with
+// spaces that a raw `file://` concat would leave un-percent-encoded). Resolve
+// argv[1] the same way — realpath then pathToFileURL — so both sides match under
+// npm-installed bin symlinks and space-bearing paths alike.
+const isMain =
+  !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 if (isMain) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),

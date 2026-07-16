@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { configFileSchema, importResponseSchema } from '@promocean/contracts'
+import { readBody, renderErrorBody } from '../http.js'
 import { planHasChanges, renderPlan } from '../render.js'
 import type { CommandResult } from '../types.js'
 
@@ -48,20 +49,20 @@ export async function runImport(opts: ImportOptions): Promise<CommandResult> {
     headers: { 'x-config-secret': secret, 'content-type': 'application/json' },
     body: JSON.stringify({ file: parsedFile.data, prune: opts.prune, dryRun: opts.dryRun }),
   })
-  const body: unknown = await res.json().catch(() => null)
+  const { json: body, text } = await readBody(res)
 
   // 422: partial apply. Still an ImportResponse shape — render the (applied) plan
   // with error.stage/message prominent, but this is always a failure exit.
   if (res.status === 422) {
     const parsed = importResponseSchema.safeParse(body)
     if (!parsed.success) {
-      return { exitCode: 1, output: `Error: import failed (HTTP 422) with an unparseable response: ${JSON.stringify(body)}` }
+      return { exitCode: 1, output: `Error: import failed (HTTP 422) with an unparseable response: ${renderErrorBody(body, text)}` }
     }
     return { exitCode: 1, output: renderPlan(parsed.data) }
   }
 
   if (!res.ok) {
-    return { exitCode: 1, output: `Error: import request failed (HTTP ${res.status}): ${JSON.stringify(body)}` }
+    return { exitCode: 1, output: `Error: import request failed (HTTP ${res.status}): ${renderErrorBody(body, text)}` }
   }
 
   const parsed = importResponseSchema.safeParse(body)

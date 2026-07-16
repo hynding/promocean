@@ -705,6 +705,42 @@ describe('configFileSchema', () => {
     const file = { ...baseFile, formatVersion: 2 }
     expect(configFileSchema.safeParse(file).success).toBe(false)
   })
+
+  it('rejects a pointRules key that is not a valid event type', () => {
+    const file = { ...baseFile, project: { ...baseFile.project, pointRules: { 'Bad-Key': 1 } } }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a registeredEventTypes entry that is not a valid event type', () => {
+    const file = { ...baseFile, project: { ...baseFile.project, registeredEventTypes: ['ok_type', 'Bad Type'] } }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a duplicate slug within placements, naming the type and slug', () => {
+    const file = {
+      ...baseFile,
+      placements: [{ slug: 'homepage', name: 'Homepage' }, { slug: 'homepage', name: 'Homepage Again' }],
+    }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message).join(' ')
+      expect(messages).toContain('duplicate slug')
+      expect(messages).toContain('homepage')
+      expect(messages).toContain('placements')
+    }
+  })
+
+  it('rejects a duplicate slug within rewards', () => {
+    const file = {
+      ...baseFile,
+      rewards: [baseFile.rewards[0], { ...baseFile.rewards[0], name: 'Dup' }],
+    }
+    const result = configFileSchema.safeParse(file)
+    expect(result.success).toBe(false)
+  })
 })
 
 describe('importRequestSchema', () => {

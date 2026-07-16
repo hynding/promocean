@@ -61,5 +61,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (!project) throw new UsageError(`Missing required flag --project. ${USAGE}`)
   if (command === 'import' && !file) throw new UsageError(`Missing required flag --file. ${USAGE}`)
 
+  // Trim trailing slash(es) so `--url http://host/` and `--url http://host` both
+  // build `${url}/api/...` without a doubled slash the router would 404 on.
+  url = url.replace(/\/+$/, '')
+
   return { command, url, project, out, file, prune, dryRun }
 }

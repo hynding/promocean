@@ -15,7 +15,7 @@
  * on 1337 or verify-lifecycles on 18337) so scenarios hit the REAL controller
  * (export + import) over HTTP rather than a reimplementation.
  *
- * Eight named scenarios (each a hard finding + non-zero exit on failure):
+ * Nine named scenarios (each a hard finding + non-zero exit on failure):
  *   1. round-trip invariant — populate a project, export it, re-import: every
  *      plan bucket empty except unchanged.
  *   2. create+update+unchanged — one file mixes all three; assert exact slug
@@ -33,6 +33,10 @@
  *      lifecycle; assert 422, stage rewards/<slug>, earlier types genuinely
  *      applied, later types absent, and the RECOMPUTED plan matches DB state.
  *   8. update-in-place preserves documentId (capture before/after).
+ *   9. prune orphan-ref guard — a prune file that keeps an offer but drops its
+ *      placement is a 400 unknown reference BEFORE any write (that placement is
+ *      about to be deleted, orphaning the offer); the same file WITHOUT prune
+ *      passes the cross-ref (the existing placement survives). Both asserted.
  *
  * Usage:
  *   pnpm --filter cms verify:config-sync
@@ -457,6 +461,45 @@ async function scenario8UpdatePreservesDocumentId(app: any) {
   truthy(S, after?.name === 'After', `name updated to "After" (got "${after?.name}")`)
 }
 
+async function scenario9PruneOrphanRef(app: any) {
+  console.log('\n[verify-config-sync] === Scenario 9: prune orphan-ref guard ===')
+  const S = 'prune-orphan-ref'
+  const projectId = await newProject(app, 'PruneOrphan', 'verify-cfgsync-pruneorphan')
+  const placement = await app.documents('api::placement.placement').create({
+    data: { slug: 'p-existing', name: 'Existing', project: projectId },
+  })
+  await app.documents('api::offer.offer').create({
+    data: { slug: 'o1', name: 'Offer One', headline: 'Head', priority: 0, placement: placement.documentId, project: projectId },
+  })
+
+  // The file keeps offer o1 but omits placement p-existing. With prune, that
+  // placement is about to be deleted, so the surviving offer would be orphaned:
+  // a 400 unknown reference BEFORE any write.
+  const file = buildFile({
+    placements: [],
+    offers: [fOffer('o1', 'Offer One', 'p-existing')],
+  })
+
+  const before = await countAll(app, projectId)
+  const pruned = await importFile(projectId, file, { prune: true })
+  truthy(S, pruned.status === 400, `prune dropping the offer's placement -> 400 (status ${pruned.status})`)
+  truthy(S, pruned.body?.error === 'unknown reference', `body.error == 'unknown reference' (got ${JSON.stringify(pruned.body?.error)})`)
+  const hasDetail =
+    Array.isArray(pruned.body?.details) &&
+    pruned.body.details.some((d: any) => d.offer === 'o1' && d.ref === 'p-existing' && d.type === 'placement')
+  truthy(S, hasDetail, `details include {offer:o1, ref:p-existing, type:placement} (got ${JSON.stringify(pruned.body?.details)})`)
+  const afterPrune = await countAll(app, projectId)
+  truthy(S, afterPrune === before, `prune 400 wrote nothing (rows before=${before}, after=${afterPrune})`)
+
+  // Same file WITHOUT prune: the existing placement survives, so the cross-ref
+  // resolves and the import is accepted (no unknown-ref 400). Dry-run keeps it
+  // write-free while still exercising findUnknownRefs (which runs before the
+  // dry-run short-circuit).
+  const noPrune = await importFile(projectId, file, { prune: false, dryRun: true })
+  truthy(S, noPrune.status === 200, `without prune -> cross-ref passes, status 200 (status ${noPrune.status})`)
+  truthy(S, noPrune.body?.error !== 'unknown reference', 'without prune -> not an unknown-reference rejection')
+}
+
 // --- main --------------------------------------------------------------------
 
 async function main() {
@@ -497,6 +540,7 @@ async function main() {
     await scenario6UnknownRef(app)
     await scenario7MidRun422(app)
     await scenario8UpdatePreservesDocumentId(app)
+    await scenario9PruneOrphanRef(app)
   } catch (e: any) {
     console.error('[verify-config-sync] unexpected error:', e)
     exitCode = 1

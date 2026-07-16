@@ -64,6 +64,11 @@ describe('parseArgs', () => {
     const parsed = parseArgs(['import', '--url', 'http://x', '--project', 'p1', '--file', 'f.json', '--prune', '--dry-run'])
     expect(parsed).toMatchObject({ prune: true, dryRun: true, file: 'f.json' })
   })
+  it('trims trailing slash(es) from --url so request paths do not double up', () => {
+    expect(parseArgs(['export', '--url', 'http://x/', '--project', 'p1']).url).toBe('http://x')
+    expect(parseArgs(['export', '--url', 'http://x///', '--project', 'p1']).url).toBe('http://x')
+    expect(parseArgs(['export', '--url', 'http://x', '--project', 'p1']).url).toBe('http://x')
+  })
 })
 
 describe('export command', () => {
@@ -110,6 +115,15 @@ describe('export command', () => {
     expect(result.exitCode).toBe(1)
     expect(result.output).toContain('401')
     expect(result.output).toContain('nope')
+  })
+
+  it('renders a non-JSON error body as its raw text (not the literal "null")', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('502 Bad Gateway', { status: 502 })))
+    const result = await runExport({ url: 'http://api.test', project: 'p1', fetchImpl })
+    expect(result.exitCode).toBe(1)
+    expect(result.output).toContain('502')
+    expect(result.output).toContain('Bad Gateway')
+    expect(result.output).not.toContain('null')
   })
 })
 
@@ -188,5 +202,15 @@ describe('import command', () => {
     expect(result.exitCode).toBe(1)
     expect(result.output).toContain('401')
     expect(result.output).toContain('Unauthorized')
+  })
+
+  it('renders a non-JSON error body as its raw text (not the literal "null")', async () => {
+    const file = await writeConfigFile(minimalFile)
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('<html>500</html>', { status: 500 })))
+    const result = await runImport({ url: 'http://api.test', project: 'p1', file, prune: false, dryRun: false, fetchImpl })
+    expect(result.exitCode).toBe(1)
+    expect(result.output).toContain('500')
+    expect(result.output).toContain('<html>500</html>')
+    expect(result.output).not.toContain('null')
   })
 })
