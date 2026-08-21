@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import type { ApiKeyStore, BackfillStore, ConfigStore, EngagementStore, ErasureStore, IngestionStore, OfferMetricsStore, ProgressStore, RewardStore, StatsStore } from '@promocean/core'
+import type { ApiKeyStore, BackfillStore, ConfigStore, EngagementStore, ErasureStore, IngestionStore, OfferMetricsStore, ProgressStore, RewardStore, StatsStore, UsageStore } from '@promocean/core'
 import { authMiddleware } from './auth.js'
-import { envInt } from './env.js'
+import { envEnum, envInt } from './env.js'
 import { logger } from './logger.js'
 import { buildOpenApiDocument } from './openapi.js'
 import { createRateLimiter } from './rate-limit.js'
@@ -18,6 +18,7 @@ import { offersRoute } from './routes/offers.js'
 import { placementsRoute } from './routes/placements.js'
 import { rewardsRoute } from './routes/rewards.js'
 import { statsRoute } from './routes/stats.js'
+import { usageRoute } from './routes/usage.js'
 import { usersRoute } from './routes/users.js'
 import type { WebhookDispatcher } from './webhooks.js'
 
@@ -84,6 +85,7 @@ export interface AppDeps {
   engagementStore: EngagementStore
   rewardStore: RewardStore
   backfillStore: BackfillStore
+  usageStore: UsageStore
   webhooks?: WebhookDispatcher
   readiness?: {
     checkDb: () => Promise<void>
@@ -94,11 +96,13 @@ export interface AppDeps {
 export interface CreateAppOptions {
   rateLimitPerMinute?: number
   rateLimitMaxBuckets?: number
+  usageEnforcement?: 'off' | 'warn' | 'block'
 }
 
 export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
   const rateLimitPerMinute = opts.rateLimitPerMinute ?? envInt('RATE_LIMIT_PER_MINUTE', 300)
   const rateLimitMaxBuckets = opts.rateLimitMaxBuckets ?? envInt('RATE_LIMIT_MAX_BUCKETS', 10_000)
+  const usageEnforcement = opts.usageEnforcement ?? envEnum('USAGE_ENFORCEMENT', ['off', 'warn', 'block'] as const, 'warn')
   const app = new Hono()
   app.use('*', async (c, next) => {
     const requestId = randomUUID()
@@ -134,13 +138,14 @@ export function createApp(deps: AppDeps, opts: CreateAppOptions = {}) {
   app.get('/docs', (c) => c.html(docsHtml))
   app.use('/v1/*', createRateLimiter(rateLimitPerMinute, { maxBuckets: rateLimitMaxBuckets }))
   app.use('/v1/*', authMiddleware(deps.apiKeyStore))
-  app.route('/v1/events', eventsRoute(deps))
+  app.route('/v1/events', eventsRoute(deps, { usageEnforcement }))
   app.route('/v1/events', liveEventsRoute(deps))
   app.route('/v1/users', usersRoute(deps))
   app.route('/v1', engagementRoute(deps))
   app.route('/v1/placements', placementsRoute(deps))
   app.route('/v1/offers', offersRoute(deps))
   app.route('/v1/stats', statsRoute(deps))
+  app.route('/v1/usage', usageRoute(deps))
   app.route('/v1/rewards', rewardsRoute(deps))
   app.route('/v1/coupons', couponsRoute(deps))
   app.route('/v1/achievements', achievementsRoute(deps))

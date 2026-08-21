@@ -17,6 +17,7 @@ import {
   rewardsResponseSchema,
   statsResponseSchema,
   streakResponseSchema,
+  usageResponseSchema,
   trackEventRequestSchema,
   trackEventResponseSchema,
   userAchievementsResponseSchema,
@@ -55,6 +56,7 @@ export function buildOpenApiDocument(version: string) {
     offerImpressionResponse: toSchema(offerImpressionResponseSchema),
     liveEventsResponse: toSchema(liveEventsResponseSchema),
     statsResponse: toSchema(statsResponseSchema),
+    usageResponse: toSchema(usageResponseSchema),
     walletResponse: toSchema(walletResponseSchema),
     streakResponse: toSchema(streakResponseSchema),
     leaderboardResponse: toSchema(leaderboardResponseSchema),
@@ -189,6 +191,26 @@ export function buildOpenApiDocument(version: string) {
           '200': {
             description: 'Aggregated stats for the requested range.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/statsResponse' } } },
+          },
+          '403': {
+            description: 'A publishable key was used; a secret key is required.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/errorEnvelope' } } },
+          },
+          default: errorResponse,
+        },
+      },
+    },
+    '/v1/usage': {
+      get: {
+        summary: "One month's metering usage (MAU + event counts) and plan-limit standing. Requires a secret key.",
+        description: "`mau`/`events` describe the authenticated environment's usage; `mauIncluded`/`percentUsed`/`overLimit` are always evaluated against the live environment's MAU (test usage never counts toward a plan). `plan: null` means self-hosted/unmetered.",
+        parameters: [
+          { name: 'month', in: 'query', required: false, schema: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }, description: 'Month key (YYYY-MM); defaults to the current UTC month.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Usage for the requested month.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/usageResponse' } } },
           },
           '403': {
             description: 'A publishable key was used; a secret key is required.',

@@ -530,6 +530,7 @@ export default {
       environment: key.environment,
       keyType: key.keyType,
       allowedOrigins,
+      plan: key.project.plan ?? null,
     }
   },
   async importProject(ctx: any) {

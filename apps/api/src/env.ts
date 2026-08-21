@@ -16,3 +16,15 @@ export function envInt(name: string, fallback: number): number {
   }
   return parsed
 }
+
+/**
+ * Reads an enum-valued env var with the same missing-vs-junk contract as envInt:
+ * unset falls back silently; set-but-not-allowed falls back with a warning.
+ */
+export function envEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const raw = process.env[name]
+  if (raw === undefined) return fallback
+  if ((allowed as readonly string[]).includes(raw)) return raw as T
+  logger.warn({ name, raw, allowed, fallback }, 'env: invalid enum value, using fallback')
+  return fallback
+}

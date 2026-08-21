@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Promocean: achievements, offers, and live events for any app</title>
+<meta name="description" content="Open-core engagement platform: achievements, first-party offers, timed events, points, and rewards from one API. Free to 1,000 monthly active users.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23101418'/%3E%3Cpath d='M4 20c4-6 8-6 12 0s8 6 12 0' stroke='%2334b8a0' stroke-width='3.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<meta property="og:title" content="Promocean">
+<meta property="og:description" content="Achievements, offers, and live promotional events for any website or app. One API.">
+<style>
+  :root {
+    --bg: #101418;
+    --bg-raise: #171d23;
+    --bg-inset: #0b0e11;
+    --line: #262f38;
+    --text: #e8edf2;
+    --text-dim: #9aa7b4;
+    --accent: #34b8a0;
+    --accent-dim: #1e6f62;
+    --radius: 10px;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner { display: flex; align-items: center; gap: 28px; height: 64px; }
+  .brand { font-weight: 700; font-size: 18px; color: var(--text); letter-spacing: -0.02em; }
+  .brand:hover { text-decoration: none; }
+  .brand .tide { color: var(--accent); }
+  .nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 14.5px; }
+  .nav-links a { color: var(--text-dim); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+  .btn {
+    display: inline-block; padding: 10px 18px; border-radius: var(--radius);
+    font-weight: 600; font-size: 15px; line-height: 1.4; white-space: nowrap;
+    transition: transform 0.12s ease, background 0.15s ease;
+  }
+  .btn:hover { text-decoration: none; }
+  .btn:active { transform: translateY(1px); }
+  .btn-solid { background: var(--accent); color: #072520; }
+  .btn-solid:hover { background: #46cbb3; }
+  .btn-ghost { border: 1px solid var(--line); color: var(--text); }
+  .btn-ghost:hover { border-color: var(--accent-dim); }
+
+  /* Hero: split layout, copy left, real SDK code right */
+  .hero { padding: 72px 0 88px; border-bottom: 1px solid var(--line); }
+  .hero-grid { display: grid; grid-template-columns: 6fr 5fr; gap: 56px; align-items: center; }
+  h1 { font-size: clamp(34px, 4.6vw, 52px); line-height: 1.08; letter-spacing: -0.03em; font-weight: 750; }
+  h1 .tide { color: var(--accent); }
+  .hero p.sub { margin: 20px 0 28px; font-size: 18px; color: var(--text-dim); max-width: 46ch; }
+  .hero .ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+
+  pre.code {
+    background: var(--bg-inset); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 22px 24px; font-family: var(--mono); font-size: 13.5px; line-height: 1.75;
+    overflow-x: auto; color: #c7d2dc;
+  }
+  pre.code .c { color: #5b6b7a; }   /* comment */
+  pre.code .k { color: #7fd4c4; }   /* call */
+  pre.code .s { color: #d0b47f; }   /* string */
+
+  section { padding: 88px 0; }
+  section + section { border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(26px, 3.2vw, 36px); letter-spacing: -0.02em; line-height: 1.15; }
+  .lede { margin-top: 14px; color: var(--text-dim); max-width: 62ch; }
+
+  /* Capabilities: bento with varied cells */
+  .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-top: 44px; }
+  .cell {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 24px;
+    background: var(--bg-raise);
+  }
+  .cell.big { grid-column: span 3; background: linear-gradient(160deg, var(--bg-raise), #12312b); }
+  .cell.mid { grid-column: span 3; }
+  .cell.small { grid-column: span 2; }
+  .cell h3 { font-size: 17px; margin-bottom: 8px; letter-spacing: -0.01em; }
+  .cell p { font-size: 14.5px; color: var(--text-dim); }
+  .cell .mono-note { font-family: var(--mono); font-size: 12.5px; color: var(--accent); margin-top: 14px; }
+
+  /* How it ships: vertical, no card grid */
+  .ship { margin-top: 40px; display: grid; gap: 0; }
+  .ship-row { display: grid; grid-template-columns: 200px 1fr; gap: 28px; padding: 26px 0; }
+  .ship-row + .ship-row { border-top: 1px solid var(--line); }
+  .ship-row b { font-size: 16.5px; }
+  .ship-row p { color: var(--text-dim); font-size: 15px; max-width: 66ch; }
+  .ship-row code { font-family: var(--mono); font-size: 13px; color: var(--accent); background: var(--bg-inset); padding: 2px 7px; border-radius: 6px; }
+
+  /* Pricing */
+  .plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 44px; }
+  .plan {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 26px 24px;
+    background: var(--bg-raise); display: flex; flex-direction: column; gap: 6px;
+  }
+  .plan.star { border-color: var(--accent-dim); background: linear-gradient(180deg, #12312b, var(--bg-raise) 55%); }
+  .plan .name { font-weight: 700; font-size: 15px; }
+  .plan .price { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; margin-top: 4px; }
+  .plan .price small { font-size: 14px; font-weight: 500; color: var(--text-dim); }
+  .plan .mau { font-family: var(--mono); font-size: 12.5px; color: var(--accent); margin-bottom: 10px; }
+  .plan ul { list-style: none; padding: 0; font-size: 14px; color: var(--text-dim); display: grid; gap: 7px; margin-bottom: 18px; }
+  .plan .btn { margin-top: auto; text-align: center; }
+  .pricing-note { margin-top: 26px; font-size: 14px; color: var(--text-dim); max-width: 72ch; }
+
+  /* Open core */
+  .core-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 40px; }
+  .core-grid h3 { font-size: 17px; margin-bottom: 10px; }
+  .core-grid p { color: var(--text-dim); font-size: 15px; }
+  .core-grid .pkgs { margin-top: 16px; font-family: var(--mono); font-size: 13px; line-height: 2; color: #c7d2dc; }
+  .core-grid .pkgs span { color: var(--text-dim); }
+
+  /* Final CTA */
+  .final { text-align: left; }
+  .final .ctas { margin-top: 28px; display: flex; gap: 14px; flex-wrap: wrap; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; font-size: 14px; color: var(--text-dim); }
+  footer .cols { display: flex; gap: 32px; flex-wrap: wrap; justify-content: space-between; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-grid > * { animation: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .hero-grid > *:last-child { animation-delay: 0.08s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+  }
+
+  @media (max-width: 900px) {
+    .hero-grid, .core-grid { grid-template-columns: 1fr; }
+    .plans { grid-template-columns: 1fr 1fr; }
+    .ship-row { grid-template-columns: 1fr; gap: 8px; }
+    .nav-links a.hide-sm { display: none; }
+  }
+  @media (max-width: 560px) {
+    .plans { grid-template-columns: 1fr; }
+    .bento { grid-template-columns: 1fr; }
+    .cell.big, .cell.mid, .cell.small { grid-column: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#">promo<span class="tide">cean</span></a>
+    <nav class="nav-links">
+      <a href="#capabilities" class="hide-sm">Capabilities</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#open-core" class="hide-sm">Open core</a>
+      <a href="https://github.com/hynding/promocean">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <h1>Achievements, offers, and live events. <span class="tide">One API.</span></h1>
+      <p class="sub">The engagement layer for any website or app: gamification, first-party promotions, and timed events that no other vendor bundles.</p>
+      <div class="ctas">
+        <a class="btn btn-solid" href="https://github.com/hynding/promocean#quickstart">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/hynding/promocean/issues/new?template=cloud-waitlist.md&title=Cloud+waitlist">Join the cloud waitlist</a>
+      </div>
+    </div>
+    <pre class="code"><span class="c">// track an event; unlocks evaluate server-side</span>
+<span class="k">await</span> promocean.track(<span class="s">'lesson_completed'</span>)
+
+<span class="c">// double-progress weekend? one config change</span>
+<span class="k">const</span> events = <span class="k">await</span> promocean.getLiveEvents()
+<span class="c">// [{ name: 'Weekly Happy Hour', multiplier: 2,</span>
+<span class="c">//    state: 'live', endsAt: '...' }]</span>
+
+<span class="c">// spend earned points on a reward</span>
+<span class="k">await</span> promocean.claimReward(<span class="s">'free-month'</span>)</pre>
+  </div>
+</div>
+
+<section id="capabilities">
+  <div class="wrap">
+    <h2>Everything between "user did a thing" and "user came back"</h2>
+    <p class="lede">Competitors sell you gamification or promotions or loyalty. Real products need all three wired together, and that wiring is the hard part.</p>
+    <div class="bento">
+      <div class="cell big">
+        <h3>Timed events as a first-class primitive</h3>
+        <p>Double-points weekends, flash promos, recurring happy hours. Lifecycle webhooks (live, ending soon, ended), progress multipliers, countdown widgets. Everyone else hand-assembles this from cron jobs.</p>
+        <p class="mono-note">recurrence: daily | weekly | monthly</p>
+      </div>
+      <div class="cell mid">
+        <h3>Achievements &amp; progress</h3>
+        <p>Event-count criteria, tiered artwork, retroactive backfill, idempotent ingestion, and unlock webhooks. Progress clamps at target; multipliers never over-award.</p>
+      </div>
+      <div class="cell small">
+        <h3>Points, streaks, leaderboards</h3>
+        <p>Per-event and per-unlock awards in one transaction. Windowed rankings.</p>
+      </div>
+      <div class="cell small">
+        <h3>Rewards &amp; coupons</h3>
+        <p>Points-priced rewards minting unique or shared codes, with race-safe inventory and one-time redemption.</p>
+      </div>
+      <div class="cell small">
+        <h3>First-party offers</h3>
+        <p>Placements, impressions, clicks, CTR stats. Offers can attach to live events.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Built like infrastructure, not a widget farm</h2>
+    <div class="ship">
+      <div class="ship-row">
+        <b>Developer-first</b>
+        <p>REST API with OpenAPI generated from the same zod contracts that validate every route. TypeScript SDK with retries and idempotency. React widgets under MIT. <code>test</code> and <code>live</code> keys from day one, free.</p>
+      </div>
+      <div class="ship-row">
+        <b>Marketer-usable</b>
+        <p>Campaign definitions live in a CMS admin, not in code. Marketing ships a flash promo without a deploy; engineering keeps the runtime plane.</p>
+      </div>
+      <div class="ship-row">
+        <b>Config as code</b>
+        <p>Export a project's whole configuration to one JSON file, review it as a diff, apply it per environment. <code>promocean import --dry-run</code> exits 2 on drift, ready for CI.</p>
+      </div>
+      <div class="ship-row">
+        <b>Privacy-aware</b>
+        <p>No PII beyond the external user id you choose. One-call GDPR-style erasure. Signed webhooks with replay guidance.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <h2>Priced on active users. Only active users.</h2>
+    <p class="lede">MAU means a distinct user with at least one tracked event this month. Dormant users are free. Test-mode usage is always free. No API features gated to top tiers.</p>
+    <div class="plans">
+      <div class="plan">
+        <div class="name">Free</div>
+        <div class="price">$0</div>
+        <div class="mau">1,000 MAU included</div>
+        <ul>
+          <li>Full API, no feature gates</li>
+          <li>Test + live environments</li>
+          <li>Community support</li>
+        </ul>
+        <a class="btn btn-ghost" href="https://github.com/hynding/promocean/issues/new?template=cloud-waitlist.md&title=Cloud+waitlist">Join the cloud waitlist</a>
+      </div>
+      <div class="plan star">
+        <div class="name">Growth</div>
+        <div class="price">$99<small>/mo</small></div>
+        <div class="mau">10,000 MAU included</div>
+        <ul>
+          <li>Everything in Free</li>
+          <li>Signed webhooks at scale</li>
+          <li>Email support</li>
+        </ul>
+        <a class="btn btn-solid" href="https://github.com/hynding/promocean/issues/new?template=cloud-waitlist.md&title=Cloud+waitlist">Join the cloud waitlist</a>
+      </div>
+      <div class="plan">
+        <div class="name">Scale</div>
+        <div class="price">$299<small>/mo</small></div>
+        <div class="mau">50,000 MAU included</div>
+        <ul>
+          <li>Everything in Growth</li>
+          <li>Priority support</li>
+          <li>Usage API for reconciliation</li>
+        </ul>
+        <a class="btn btn-ghost" href="https://github.com/hynding/promocean/issues/new?template=cloud-waitlist.md&title=Cloud+waitlist">Join the cloud waitlist</a>
+      </div>
+      <div class="plan">
+        <div class="name">Enterprise</div>
+        <div class="price">Custom</div>
+        <div class="mau">Custom MAU</div>
+        <ul>
+          <li>SLA + data residency</li>
+          <li>Commercial license included</li>
+          <li>Migration assistance</li>
+        </ul>
+        <a class="btn btn-ghost" href="https://github.com/hynding/promocean/issues/new?labels=licensing&title=Enterprise+inquiry">Ask about licensing</a>
+      </div>
+    </div>
+    <p class="pricing-note">Comparable platforms charge $99/mo for 1,000 active users of gamification alone, or gate API access behind $700+/mo loyalty tiers. Promocean's free tier is ten times larger and the bundle includes promotions, timed events, and rewards.</p>
+  </div>
+</section>
+
+<section id="open-core">
+  <div class="wrap">
+    <h2>Open core, honestly split</h2>
+    <div class="core-grid">
+      <div>
+        <h3>Everything you embed is MIT</h3>
+        <p>The SDK, React widgets, shared schemas, and the config-as-code CLI carry the MIT license, so nothing copyleft ever touches your codebase. Self-host the whole GPL platform yourself, unmetered, forever.</p>
+        <div class="pkgs">
+          @promocean/sdk <span>MIT</span><br>
+          @promocean/widgets <span>MIT</span><br>
+          @promocean/contracts <span>MIT</span><br>
+          @promocean/cli <span>MIT</span>
+        </div>
+      </div>
+      <div>
+        <h3>Need the platform without GPL terms?</h3>
+        <p>The runtime API, CMS, and adapters are GPL-3.0. If your legal team needs different terms for an embedded or white-label deployment, a commercial license for the platform is available.</p>
+        <p style="margin-top:14px"><a href="https://github.com/hynding/promocean/blob/main/COMMERCIAL-LICENSE.md">Read the commercial licensing terms</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>Prove the loop in fifteen minutes</h2>
+    <p class="lede">Clone the repo, run one Docker command, and watch an achievement unlock live in the demo app: toast, badge cabinet, points, and stats included.</p>
+    <div class="ctas">
+      <a class="btn btn-solid" href="https://github.com/hynding/promocean#quickstart">Get started</a>
+      <a class="btn btn-ghost" href="https://github.com/hynding/promocean/blob/main/README.md#api-surface">Read the API surface</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap cols">
+    <div>promocean, an open-core engagement platform.</div>
+    <div style="display:flex; gap:24px">
+      <a href="https://github.com/hynding/promocean">GitHub</a>
+      <a href="https://github.com/hynding/promocean/blob/main/LICENSING.md">Licensing</a>
+      <a href="https://github.com/hynding/promocean/issues">Issues</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

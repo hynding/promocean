@@ -4,6 +4,12 @@ Achievements, offers, and live promotional events for any website or app — one
 
 Monorepo: pnpm + Turborepo. See `docs/superpowers/specs/` for the design spec.
 
+**Self-hosting is free and unmetered** (see the Quickstart below). A hosted
+version — Promocean Cloud, free to 1,000 monthly active users — is coming:
+[join the waitlist](https://github.com/hynding/promocean/issues/new?template=cloud-waitlist.md&title=Cloud+waitlist).
+Need the GPL platform under different terms? See
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+
 ### Timed events
 
 Timed events apply an achievement-progress multiplier while an event is live
@@ -230,6 +236,7 @@ middleware so tooling can fetch the spec without a key.
 | POST | `/v1/rewards/:slug/claim` | pk or sk | Claim a reward for a user, returning its coupon code. Rejected with `404 not_found` for an unknown slug, or `409` `reward_unavailable` / `claim_limit_reached` / `insufficient_points` when the reward, per-user limit, or points balance rules aren't met. |
 | POST | `/v1/coupons/validate` | sk only | Look up a coupon code without redeeming it: `{ valid, rewardSlug?, status?, reason? }`. Rejected with `403 forbidden` for publishable keys. |
 | POST | `/v1/coupons/redeem` | sk only | Redeem a coupon code (one-time). Rejected with `409 already_redeemed` on a second redemption, `409 reward_unavailable` if the reward has since expired, or `404 not_found` for an unknown code. Rejected with `403 forbidden` for publishable keys. |
+| GET | `/v1/usage` | sk only | One month's metering usage and plan standing: `{ month, environment, mau, events, plan, mauIncluded, percentUsed, overLimit }`. Optional `?month=YYYY-MM` (default: current UTC month) for history — this is the billing-reconciliation read model. `mau`/`events` describe the key's environment; the plan fields are always evaluated against **live** MAU (test usage never counts toward a plan). Rejected with `403 forbidden` for publishable keys. |
 | GET | `/v1/stats` | sk only | Aggregate stats for the project: event/unlock/impression/click totals, per-achievement unlocks, per-offer CTR, per-timed-event participant counts. Optional `?from=&to=` ISO datetime range. A timed event appears in the stats breakdown only when one of its participation windows intersects the queried range (changed in Sprint 9 — previously out-of-range events appeared zero-filled). Rejected with `403 forbidden` for publishable keys. |
 | POST | `/v1/achievements/:id/backfill` | sk only | Retroactively recompute progress/unlocks/points for an achievement against all historical events of its `eventType` — see "Retroactive achievement backfill" above. Rejected with `403 forbidden` for publishable keys, `404 not_found` for an unknown achievement id, or `409 backfill_in_progress` when another backfill of the same achievement is already running. |
 | GET | `/v1/openapi.json` | none | Serve the OpenAPI document, generated from the same zod contracts the routes validate against. |
@@ -245,6 +252,27 @@ in the current window share a single overflow bucket (still counted and
 allowlist when one is configured on the key: requests carrying an `Origin`
 header not on that list are rejected with `403 origin_not_allowed` (secret
 keys, and requests with no `Origin` header, are exempt from this check).
+
+### Plans & usage metering
+
+A project may carry an optional `plan` in the CMS (`free` | `growth` | `scale`
+| `enterprise`). **Self-hosted deployments leave it unset and are entirely
+unmetered — no plan means no usage queries, no warnings, no limits**, the same
+opt-in pattern as `registeredEventTypes`. When a plan IS set (i.e. on a hosted
+platform), `POST /v1/events` enforces the plan's included live-MAU according to
+`USAGE_ENFORCEMENT` (env var, read at process start):
+
+| Mode | Behavior when live MAU exceeds the plan's included MAU |
+| --- | --- |
+| `off` | Nothing — metering counters still accrue, `GET /v1/usage` still reports. |
+| `warn` (default) | Ingests succeed and carry an `x-promocean-usage: over-limit; mau=…; included=…` response header, plus a structured log warning. |
+| `block` | Ingests from users **not yet active this month** are rejected `402 mau_limit_exceeded`; users already active this month are never locked out mid-month (they get the `warn` header instead). |
+
+MAU = a distinct external user id with ≥1 tracked event in the calendar month,
+per environment. Only the `live` environment counts toward a plan — test-mode
+usage is free by design. Included MAU per plan: `free` 1,000 · `growth` 10,000
+· `scale` 50,000 · `enterprise` custom (no fixed cap). A config-plane hiccup
+during the gate check fails open (ingestion availability beats enforcement).
 
 ### Data retention
 

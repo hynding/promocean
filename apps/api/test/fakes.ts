@@ -1,7 +1,7 @@
 import type {
   AchievementDefinition, ApiKeyStore, AuthContext, BackfillStore, ConfigStore, EngagementStore, EngagementWrite, ErasureStore,
   IngestionStore, OfferDefinition, OfferMetricsStore, PointRules, ProgressStore, RewardDefinition, RewardStore,
-  Scope, StatsStore, TimedEventDefinition,
+  Scope, StatsStore, TimedEventDefinition, UsageStore,
 } from '@promocean/core'
 
 const sk = (s: Scope, rest: string) => `${s.projectId}:${s.environment}:${rest}`
@@ -186,11 +186,29 @@ export function makeFakes(
   }
   const setBackfillResult = (r: BackfillResult) => { backfillResult = r }
 
+  // getUsage/isUserActive back the usage route and the plan-limit gate; results are settable
+  // per-scope-agnostic (tests exercise one scope at a time). recordUsage mirrors the ingest
+  // fake's `usage` array so both write paths stay observable.
+  let usageResult: { mau: number; events: number } = { mau: 0, events: 0 }
+  let activeUserIds = new Set<string>()
+  const usageCalls: Array<{ scope: Scope; month: string }> = []
+  const usageStore: UsageStore = {
+    recordUsage: async (_scope, userId, month) => { usage.push(`${userId}:${month}`) },
+    getUsage: async (scope, month) => {
+      usageCalls.push({ scope, month })
+      return usageResult
+    },
+    isUserActive: async (_scope, _month, userId) => activeUserIds.has(userId),
+  }
+  const setUsageResult = (r: { mau: number; events: number }) => { usageResult = r }
+  const setActiveUserIds = (ids: string[]) => { activeUserIds = new Set(ids) }
+
   return {
     configStore, apiKeyStore, progressStore, ingestionStore, usage, offerMetricsStore, metrics, erasureStore,
     erasedUsers, erasureCounts, statsStore, statsCalls, setStatsResult, engagementCalls,
     engagementStore, setWalletResult, setStreakResult, setLeaderboardResult, leaderboardCalls,
     rewardStore, claimCalls, validateCalls, redeemCalls, setClaimCounts, setClaimResult, setValidateResult, setRedeemResult,
     backfillStore, backfillCalls, setBackfillResult,
+    usageStore, usageCalls, setUsageResult, setActiveUserIds,
   }
 }

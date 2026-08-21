@@ -59,4 +59,32 @@ describe('PgUsageStore', () => {
     )
     expect(mau.rows[0].n).toBe(2)
   })
+  it('getUsage reads back MAU + event counts for one scope+month', async () => {
+    const store = new PgUsageStore(db)
+    await store.recordUsage(scope, 'u1', '2026-08')
+    await store.recordUsage(scope, 'u2', '2026-08')
+    await store.recordUsage(scope, 'u2', '2026-08')
+    await store.recordUsage(otherScope, 'u9', '2026-08') // different project, same month
+    expect(await store.getUsage(scope, '2026-08')).toEqual({ mau: 2, events: 3 })
+    expect(await store.getUsage(otherScope, '2026-08')).toEqual({ mau: 1, events: 1 })
+  })
+  it('getUsage reads absent months as zero', async () => {
+    const store = new PgUsageStore(db)
+    expect(await store.getUsage(scope, '2031-01')).toEqual({ mau: 0, events: 0 })
+  })
+  it('getUsage scopes by environment', async () => {
+    const store = new PgUsageStore(db)
+    const liveScope: Scope = { projectId: 'p1', environment: 'live' }
+    await store.recordUsage(liveScope, 'u1', '2026-09')
+    expect(await store.getUsage(liveScope, '2026-09')).toEqual({ mau: 1, events: 1 })
+    expect(await store.getUsage(scope, '2026-09')).toEqual({ mau: 0, events: 0 })
+  })
+  it('isUserActive answers per scope+month+user', async () => {
+    const store = new PgUsageStore(db)
+    await store.recordUsage(scope, 'u1', '2026-10')
+    expect(await store.isUserActive(scope, '2026-10', 'u1')).toBe(true)
+    expect(await store.isUserActive(scope, '2026-10', 'u2')).toBe(false)
+    expect(await store.isUserActive(scope, '2026-11', 'u1')).toBe(false)
+    expect(await store.isUserActive(otherScope, '2026-10', 'u1')).toBe(false)
+  })
 })

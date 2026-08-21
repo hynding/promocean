@@ -624,6 +624,9 @@ export interface ApiProjectProject extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    plan: Schema.Attribute.Enumeration<
+      ['free', 'growth', 'scale', 'enterprise']
+    >;
     pointRules: Schema.Attribute.JSON;
     publishedAt: Schema.Attribute.DateTime;
     registeredEventTypes: Schema.Attribute.JSON;

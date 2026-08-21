@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { StrapiConfigPlane } from '../src/index.js'
 
 const achievementsBody = { achievements: [{ id: 'a1', name: 'First Lesson', description: null, artworkUrl: null, eventType: 'lesson_completed', targetCount: 1, pointsValue: 10 }] }
-const authBody = { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null }
+const authBody = { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null, plan: null }
 const ok = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
 
 function makePlane(fetchImpl: typeof fetch, cacheTtlMs = 30_000) {
@@ -88,6 +88,20 @@ describe('StrapiConfigPlane.verifyKey', () => {
     const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, allowedOrigins: ['ok', 42, null] }))
     const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
     expect(auth?.allowedOrigins).toBeNull()
+  })
+  it('maps a valid plan through', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, plan: 'growth' }))
+    const auth = await makePlane(fetchImpl).verifyKey('pk_test_demo_1234567890abcdef')
+    expect(auth?.plan).toBe('growth')
+  })
+  it('maps a junk or absent plan to null (fail-open to unmetered, never failed auth)', async () => {
+    const junk = vi.fn().mockImplementation(() => ok({ ...authBody, plan: 'platinum' }))
+    expect((await makePlane(junk).verifyKey('pk_test_demo_1234567890abcdef'))?.plan).toBeNull()
+    const { plan: _omitted, ...withoutPlan } = authBody
+    const absent = vi.fn().mockImplementation(() => ok(withoutPlan))
+    const auth = await makePlane(absent).verifyKey('pk_test_demo_1234567890abcdef')
+    expect(auth).not.toBeNull()
+    expect(auth?.plan).toBeNull()
   })
   it('returns null (not a corrupt AuthContext) on a bad keyType enum', async () => {
     const fetchImpl = vi.fn().mockImplementation(() => ok({ ...authBody, keyType: 'bogus' }))

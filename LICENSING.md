@@ -24,3 +24,7 @@ open-core angle.
 
 Each MIT package carries its own `LICENSE` file; the root `LICENSE` covers
 everything GPL-3.0-only.
+
+Commercial (non-GPL) licenses for the platform are available for embedded,
+white-label, or GPL-averse deployments — see
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).

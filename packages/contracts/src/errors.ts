@@ -14,6 +14,7 @@ export const errorCodeSchema = z.enum([
   'insufficient_points',
   'already_redeemed',
   'backfill_in_progress',
+  'mau_limit_exceeded',
 ])
 export type ErrorCode = z.infer<typeof errorCodeSchema>
 

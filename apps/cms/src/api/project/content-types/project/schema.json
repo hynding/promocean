@@ -8,6 +8,7 @@
     "slug": { "type": "uid", "targetField": "name" },
     "allowedOrigins": { "type": "json" },
     "registeredEventTypes": { "type": "json" },
-    "pointRules": { "type": "json" }
+    "pointRules": { "type": "json" },
+    "plan": { "type": "enumeration", "enum": ["free", "growth", "scale", "enterprise"] }
   }
 }
