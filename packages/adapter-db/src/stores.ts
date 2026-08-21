@@ -71,6 +71,25 @@ export class PgUsageStore implements UsageStore {
         set: { eventsCount: sql`${usageCounters.eventsCount} + 1` },
       })
   }
+  async getUsage(scope: Scope, month: string) {
+    const [mauRow] = await this.db
+      .select({ mau: sql<number>`count(*)::int` })
+      .from(monthlyActiveUsers)
+      .where(and(scoped(monthlyActiveUsers, scope), eq(monthlyActiveUsers.month, month)))
+    const [usageRow] = await this.db.select().from(usageCounters)
+      .where(and(scoped(usageCounters, scope), eq(usageCounters.month, month)))
+    return { mau: mauRow?.mau ?? 0, events: usageRow?.eventsCount ?? 0 }
+  }
+  async isUserActive(scope: Scope, month: string, userId: string) {
+    const rows = await this.db.select({ userId: monthlyActiveUsers.userId }).from(monthlyActiveUsers)
+      .where(and(
+        scoped(monthlyActiveUsers, scope),
+        eq(monthlyActiveUsers.month, month),
+        eq(monthlyActiveUsers.userId, userId),
+      ))
+      .limit(1)
+    return rows.length > 0
+  }
 }
 
 export class PgIngestionStore implements IngestionStore {

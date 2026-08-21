@@ -1,3 +1,5 @@
+import type { PlanId } from './plans.js'
+
 export type Environment = 'test' | 'live'
 
 export interface Scope {
@@ -30,6 +32,8 @@ export interface AuthContext {
   environment: Environment
   keyType: 'publishable' | 'secret'
   allowedOrigins: string[] | null
+  /** Usage plan for metering/enforcement. null = self-hosted/unmetered (the default). */
+  plan: PlanId | null
 }
 
 export type OfferAudience = { kind: 'everyone' }

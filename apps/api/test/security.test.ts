@@ -11,10 +11,10 @@ const defs = [
 const headers = { authorization: 'Bearer pk_test_valid_key_1', 'content-type': 'application/json' }
 
 function pkAuth(allowedOrigins: string[] | null = null): AuthContext {
-  return { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins }
+  return { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins, plan: null }
 }
 function skAuth(allowedOrigins: string[] | null = null): AuthContext {
-  return { projectId: 'p1', environment: 'test', keyType: 'secret', allowedOrigins }
+  return { projectId: 'p1', environment: 'test', keyType: 'secret', allowedOrigins, plan: null }
 }
 
 describe('rate limiting', () => {

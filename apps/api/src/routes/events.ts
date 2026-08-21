@@ -7,8 +7,10 @@ import {
 } from '@promocean/core'
 import type { AppDeps } from '../app.js'
 import { logger } from '../logger.js'
+import { checkUsageGate, type UsageEnforcementMode } from '../usage-gate.js'
 
-export function eventsRoute(deps: AppDeps) {
+export function eventsRoute(deps: AppDeps, opts: { usageEnforcement?: UsageEnforcementMode } = {}) {
+  const usageEnforcement = opts.usageEnforcement ?? 'warn'
   const app = new Hono()
   app.post('/', async (c) => {
     const parsed = trackEventRequestSchema.safeParse(await c.req.json().catch(() => null))
@@ -19,6 +21,19 @@ export function eventsRoute(deps: AppDeps) {
     const scope: Scope = { projectId: auth.projectId, environment: auth.environment }
     const { userId, type, idempotencyKey, meta } = parsed.data
     const occurredAt = parsed.data.occurredAt ? new Date(parsed.data.occurredAt) : new Date()
+
+    // Plan-limit gate (no-op unless the project has a plan set and the key is live-env).
+    const usageGate = await checkUsageGate(deps.usageStore, auth, userId, usageEnforcement, c.get('requestId'))
+    if (usageGate.blocked) {
+      return c.json({
+        error: {
+          code: 'mau_limit_exceeded',
+          message: 'Monthly active user limit reached for the current plan.',
+          details: { mau: usageGate.mau, mauIncluded: usageGate.mauIncluded, plan: auth.plan },
+        },
+      }, 402)
+    }
+    if (usageGate.warning) c.header('x-promocean-usage', usageGate.warning)
 
     // Config-plane failure must not block ingestion: fail open (same pattern as the
     // multiplier lookup below), just without enforcement for this request.

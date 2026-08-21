@@ -13,8 +13,8 @@ const timedEvents = [
 ]
 const headers = { authorization: 'Bearer pk_test_valid_key_1', 'content-type': 'application/json' }
 
-function pkAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null } }
-function skAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'secret', allowedOrigins: null } }
+function pkAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null, plan: null } }
+function skAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'secret', allowedOrigins: null, plan: null } }
 
 function setup(auth: AuthContext) {
   const fakes = makeFakes([], auth, [], timedEvents)

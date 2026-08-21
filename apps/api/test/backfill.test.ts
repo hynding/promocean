@@ -5,8 +5,8 @@ import { makeFakes } from './fakes.js'
 
 const headers = { authorization: 'Bearer pk_test_valid_key_1' }
 
-function pkAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null } }
-function skAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'secret', allowedOrigins: null } }
+function pkAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'publishable', allowedOrigins: null, plan: null } }
+function skAuth(): AuthContext { return { projectId: 'p1', environment: 'test', keyType: 'secret', allowedOrigins: null, plan: null } }
 
 function achievement(overrides: Partial<AchievementDefinition> = {}): AchievementDefinition {
   return {

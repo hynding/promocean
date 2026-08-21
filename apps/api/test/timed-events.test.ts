@@ -61,6 +61,11 @@ describe('POST /v1/events — timed-event multiplier wiring', () => {
 })
 
 describe('GET /v1/events/live', () => {
+  // These fixtures hardcode July/August 2026 windows; pin the clock inside them so the
+  // suite doesn't rot as real time passes the fixture dates (which happened 2026-08-20).
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-07-15T00:00:00Z')) })
+  afterEach(() => { vi.useRealTimers() })
+
   it('maps live and scheduled events, excluding disabled and ended ones', async () => {
     const live = mk({ id: 'live1', name: 'Live Now', startsAt: new Date('2026-07-01T00:00:00Z'), endsAt: new Date('2026-07-20T00:00:00Z'), endingSoonMinutes: 60 })
     const scheduled = mk({ id: 'sched1', name: 'Coming Soon', startsAt: new Date('2026-08-01T00:00:00Z'), endsAt: new Date('2026-08-10T00:00:00Z') })
@@ -143,6 +148,11 @@ describe('GET /v1/events/live — recurring occurrences', () => {
 })
 
 describe('GET /v1/placements/:slug/offer — event-gated offers', () => {
+  // Same clock-pinning rationale as the live-events block above: mk()'s default
+  // window is July 2026, which real time has since passed.
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-07-15T00:00:00Z')) })
+  afterEach(() => { vi.useRealTimers() })
+
   const baseOffer: OfferDefinition = {
     id: 'o1', placementSlug: 'homepage-banner', headline: 'Sale!', body: null, imageUrl: null,
     ctaText: null, ctaUrl: null, startsAt: null, endsAt: null, priority: 0,

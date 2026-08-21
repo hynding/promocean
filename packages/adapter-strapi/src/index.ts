@@ -333,7 +333,7 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
         // than ever construct a corrupt AuthContext.
         const parsed = verifyKeyResponseSchema.safeParse(await res.json())
         if (parsed.success) {
-          const { allowedOrigins } = parsed.data
+          const { allowedOrigins, plan } = parsed.data
           value = {
             projectId: parsed.data.projectId,
             environment: parsed.data.environment,
@@ -341,6 +341,10 @@ export class StrapiConfigPlane implements ConfigStore, ApiKeyStore {
             allowedOrigins:
               Array.isArray(allowedOrigins) && allowedOrigins.every((o) => typeof o === 'string')
                 ? (allowedOrigins as string[])
+                : null,
+            plan:
+              plan === 'free' || plan === 'growth' || plan === 'scale' || plan === 'enterprise'
+                ? plan
                 : null,
           }
         } else {

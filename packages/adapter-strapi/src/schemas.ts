@@ -112,4 +112,9 @@ export const verifyKeyResponseSchema = z.object({
   environment: z.enum(['test', 'live']),
   keyType: z.enum(['publishable', 'secret']),
   allowedOrigins: z.unknown(),
+  // Same rationale as allowedOrigins: a junk plan degrades to `null`
+  // (self-hosted/unmetered) rather than failing auth — a config mistake must
+  // never take down ingestion. `.optional()` additionally: a CMS predating the
+  // plan field must keep verifying keys (absent key ≠ corrupt record).
+  plan: z.unknown().optional(),
 })

@@ -10,11 +10,11 @@ describe('GET /v1/openapi.json', () => {
     expect(res.status).toBe(200)
   })
 
-  it('describes all sixteen documented endpoints', async () => {
+  it('describes all seventeen documented endpoints', async () => {
     const res = await app().request('/v1/openapi.json')
     const doc = await res.json()
     expect(doc.openapi).toBe('3.0.3')
-    expect(Object.keys(doc.paths)).toHaveLength(16)
+    expect(Object.keys(doc.paths)).toHaveLength(17)
     expect(Object.keys(doc.paths)).toEqual(
       expect.arrayContaining([
         '/v1/events',
@@ -25,6 +25,7 @@ describe('GET /v1/openapi.json', () => {
         '/v1/offers/{id}/impression',
         '/v1/events/live',
         '/v1/stats',
+        '/v1/usage',
         '/v1/users/{userId}/wallet',
         '/v1/users/{userId}/streak',
         '/v1/leaderboard',
@@ -50,6 +51,7 @@ describe('GET /v1/openapi.json', () => {
     const doc = await res.json()
     const skEndpoints: Array<{ path: string; method: 'get' | 'post' | 'delete' }> = [
       { path: '/v1/stats', method: 'get' },
+      { path: '/v1/usage', method: 'get' },
       { path: '/v1/users/{userId}', method: 'delete' },
       { path: '/v1/coupons/validate', method: 'post' },
       { path: '/v1/coupons/redeem', method: 'post' },

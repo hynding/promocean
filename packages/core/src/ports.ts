@@ -40,6 +40,10 @@ export interface ProgressStore {
 
 export interface UsageStore {
   recordUsage(scope: Scope, userId: string, month: string): Promise<void>
+  /** Distinct active users + tracked-event count for one scope+month. Absent rows read as zero. */
+  getUsage(scope: Scope, month: string): Promise<{ mau: number; events: number }>
+  /** Whether this user already counts toward the scope's MAU for the month. */
+  isUserActive(scope: Scope, month: string, userId: string): Promise<boolean>
 }
 
 export interface OfferMetricsStore {
