@@ -4,6 +4,12 @@ Achievements, offers, and live promotional events for any website or app — one
 
 Monorepo: pnpm + Turborepo. See `docs/superpowers/specs/` for the design spec.
 
+**Self-hosting is free and unmetered** (see the Quickstart below). A hosted
+version — Promocean Cloud, free to 1,000 monthly active users — is coming:
+[join the waitlist](https://github.com/hynding/promocean/issues/new?template=cloud-waitlist.md&title=Cloud+waitlist).
+Need the GPL platform under different terms? See
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+
 ### Timed events
 
 Timed events apply an achievement-progress multiplier while an event is live
